@@ -103,11 +103,6 @@ private fun PermissionScreen(onResult: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("Calendar access needed", style = MaterialTheme.typography.titleLarge)
-        Text(
-            "This app shows and edits the calendars synced to this phone, such as your Nextcloud calendar via DAVx5.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         Button(onClick = {
             if (blocked) {
                 activity.startActivity(
