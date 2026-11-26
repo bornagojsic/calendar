@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+tone_instructions: "Be concise and direct. Skip praise and pleasantries."
+
+reviews:
+  # Options: quiet, chill (default), assertive.
+  # Use 'quiet' to minimize comment volume on personal repos.
+  profile: "quiet"
+  poem: false
+  collapse_walkthrough: true
+
+  # Skip noisy folders/files (always prefix exclusions with !)
+  path_filters:
+    - "!**/tests/**"
+    - "!**/scripts/**"
+    - "!**/*.md"
+
+  # Tell CodeRabbit what to ignore across your codebase
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        This is a solo personal project. Focus strictly on real bugs, logic errors,
+        race conditions, memory leaks, and security vulnerabilities.
+        Do NOT comment on variable naming, code formatting, missing docstrings,
+        type annotations, or minor stylistic preferences.
