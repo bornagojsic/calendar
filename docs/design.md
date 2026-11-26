@@ -1,6 +1,6 @@
-# Calendar — Design Doc (draft v0)
+# Calendar — Design Doc (draft v1)
 
-Status: draft, under discussion. Open questions are marked **OPEN**.
+Status: draft v1. Decisions in §10.
 
 ## 1. Goal
 
@@ -82,12 +82,14 @@ Token mapping onto M3 `ColorScheme`:
 
 Event colors come from the calendar color in the provider, toned down so they sit on a dark canvas. Use a fixed lightness and chroma per palette slot so chips stay legible.
 
+Accent: `#346BF1` (blue). `onPrimary` is white.
+
 Dark only for v1. Dynamic color (Material You) is off.
 
 ## 6. Reminders and notifications
 
 - The provider broadcasts `CalendarContract.ACTION_EVENT_REMINDER` when a reminder fires. The app registers a receiver and posts a notification from it.
-- **Risk**: if another calendar app (for example Google Calendar or Etar) also handles this broadcast, the user gets duplicate notifications. The app will offer a setting to turn its own reminders off.
+- This will be the only calendar app on the device, so no other app handles the broadcast and there are no duplicate notifications. No setting to turn reminders off.
 - Notification actions: open the event, snooze (5/10/30 min, through `AlarmManager`), dismiss.
 
 ## 7. Module layout
@@ -119,11 +121,10 @@ Split into modules only if build times hurt.
 4. Reminders and notifications.
 5. Polish: search, settings, app icon.
 
-## 10. Open questions
+## 10. Decisions
 
-- **OPEN** Accent color: T3 Code stock accent, or a custom one?
-- **OPEN** Week start day and 24h vs 12h: follow the system locale, or add a setting?
-- **OPEN** App name and package id (for example `dev.<you>.calendar`).
-- **OPEN** Distribution: sideload APKs from GitHub Releases, or also F-Droid/Play?
-- **OPEN** Search: title only, or also location and description?
-- **OPEN** Remove the duplicate-reminder risk by making this the only calendar app on the device?
+- **App name / package id**: Calendar, `dev.bornagojsic.calendar`.
+- **Week start and 12h/24h**: follow the phone locale by default. Settings let you override each one: week start (locale / Monday / Sunday / Saturday) and time format (locale / 12h / 24h).
+- **Distribution**: signed APKs attached to GitHub Releases only. A workflow builds and signs the release APK on a `v*` tag. The keystore and its passwords live in GitHub Actions secrets and are never committed.
+- **Search**: matches title, location, description and attendee names/emails (case-insensitive `LIKE` on the `Events` table). Results are listed in Schedule-view style.
+- **Reminders**: this is the only calendar app on the device (see §6).
