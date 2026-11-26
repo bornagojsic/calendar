@@ -85,13 +85,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun PermissionScreen(onResult: () -> Unit) {
     val activity = LocalActivity.current ?: return
-    var asked by rememberSaveable { mutableStateOf(false) }
+    // After a denial with no rationale allowed, the system dialog won't show again: send the user to settings.
+    // Held in state and set on every result, since repeated denials change nothing else that would recompose.
+    var blocked by rememberSaveable { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        asked = true
+        blocked = PERMISSIONS.none { activity.shouldShowRequestPermissionRationale(it) }
         onResult()
     }
-    // After a denial with no rationale allowed, the system dialog won't show again: send the user to settings.
-    val blocked = asked && PERMISSIONS.none { activity.shouldShowRequestPermissionRationale(it) }
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
@@ -118,7 +118,8 @@ private fun PermissionScreen(onResult: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CalendarScreen() {
-    val resolver = LocalContext.current.contentResolver
+    // Application context: the ViewModel outlives the Activity.
+    val resolver = LocalContext.current.applicationContext.contentResolver
     val vm: CalendarViewModel = viewModel(factory = viewModelFactory {
         initializer { CalendarViewModel(CalendarRepository(resolver)) }
     })
