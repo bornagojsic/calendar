@@ -50,7 +50,7 @@ Nextcloud (CalDAV) <-> DAVx5 (sync adapter) <-> Android CalendarProvider <-> Cal
   - *Schedule*: infinite vertical list grouped by day. Empty days collapse. Today pinned on launch.
   - *Day / 3-day / Week*: an all-day strip on top and a 24h time grid below. Overlapping events split into columns. A current-time line. Pinch to zoom the hour height. Swipe horizontally to page.
   - *Month*: 6x7 grid with up to N event chips per cell plus "+k". Tap a day to open Day view.
-- **Event detail**: a bottom sheet or full screen with title, time, recurrence, location, description, reminders, calendar, and edit/delete actions.
+- **Event detail**: bottom sheet that opens half-height and can be dragged up to full screen (like Google Calendar). Shows title, time, recurrence, location, description, reminders, calendar, and edit/delete actions.
 - **Event editor**: full screen with title, all-day toggle, start/end, time zone, recurrence (presets plus custom), calendar, reminders, location, description, and color.
 - Tap an empty slot in the time grid to create an event at that time.
 
