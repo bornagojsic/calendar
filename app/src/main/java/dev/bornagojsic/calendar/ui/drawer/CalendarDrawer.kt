@@ -11,6 +11,7 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -19,10 +20,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Row
+import dev.bornagojsic.calendar.ViewMode
 import dev.bornagojsic.calendar.data.CalendarInfo
 
 @Composable
 fun CalendarDrawer(
+    mode: ViewMode?,
+    onMode: (ViewMode) -> Unit,
     calendars: List<CalendarInfo>?,
     onToggle: (CalendarInfo) -> Unit,
 ) {
@@ -33,6 +37,15 @@ fun CalendarDrawer(
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
         )
         HorizontalDivider()
+        ViewMode.entries.forEach {
+            NavigationDrawerItem(
+                label = { Text(it.label) },
+                selected = it == mode,
+                onClick = { onMode(it) },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+            )
+        }
+        HorizontalDivider(Modifier.padding(top = 8.dp))
         when {
             calendars == null -> Unit
             calendars.isEmpty() -> Text(
