@@ -50,7 +50,7 @@ private val WEEK_START = stringPreferencesKey("week_start")
 private val CLOCK = stringPreferencesKey("clock")
 
 /** How far around today search looks; Instances expands every recurrence in the range, so keep it bounded. */
-private const val SEARCH_YEARS = 2L
+const val SEARCH_YEARS = 2L
 
 /** The open editor: a draft, and the occurrence it edits (null for a new event). */
 data class Editor(val draft: Draft, val source: Source?)

@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.bornagojsic.calendar.SEARCH_YEARS
 import dev.bornagojsic.calendar.domain.Event
 import dev.bornagojsic.calendar.ui.EventLoader
 import dev.bornagojsic.calendar.ui.eventColor
@@ -127,7 +128,15 @@ fun SearchResults(events: List<Event>, onEvent: (Event) -> Unit) {
     val zone = ZoneId.systemDefault()
     val days = remember(events) {
         if (events.isEmpty()) emptyList()
-        else groupByDay(events, zone, events.minOf { it.days(zone).start }, events.maxOf { it.days(zone).endInclusive }, emptyList())
+        // Clipped to the search window, so a match spanning years doesn't list every one of its days.
+        else LocalDate.now().let { today ->
+            groupByDay(
+                events, zone,
+                maxOf(events.minOf { it.days(zone).start }, today.minusYears(SEARCH_YEARS)),
+                minOf(events.maxOf { it.days(zone).endInclusive }, today.plusYears(SEARCH_YEARS)),
+                emptyList(),
+            )
+        }
     }
     if (days.isEmpty()) {
         Text("No results", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
