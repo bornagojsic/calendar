@@ -51,7 +51,9 @@ class CalDavAccounts(private val context: Context) {
                 throw IllegalArgumentException("Wrong username or password")
             }
         }
-        val account = Account("$user@${base.host}", ACCOUNT_TYPE)
+        // Port and path keep two servers on one host apart.
+        val port = if (base.port != base.protocol.defaultPort) ":${base.port}" else ""
+        val account = Account("$user@${base.host}$port${base.encodedPath.trimEnd('/')}", ACCOUNT_TYPE)
         val data = Bundle().apply {
             putString(KEY_HOME, home.toString())
             putString(KEY_USER, user)
