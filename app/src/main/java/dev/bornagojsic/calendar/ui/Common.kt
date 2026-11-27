@@ -6,7 +6,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,7 +27,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.ColorUtils
 import dev.bornagojsic.calendar.domain.Event
 import kotlinx.coroutines.flow.Flow
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 /** Loads events for a day range; the ViewModel's `events`. */
@@ -97,4 +104,21 @@ fun DatePager(
         }
     }
     HorizontalPager(state, modifier, beyondViewportPageCount = 1) { page(rangeOf(it - CENTER)) }
+}
+
+/** M3 date picker in a dialog. The picker works in UTC-midnight millis. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DateDialog(date: LocalDate, onPick: (LocalDate) -> Unit, onDismiss: () -> Unit) {
+    val state = rememberDatePickerState(initialSelectedDateMillis = date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                state.selectedDateMillis?.let { onPick(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
+                onDismiss()
+            }) { Text("OK") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    ) { DatePicker(state) }
 }

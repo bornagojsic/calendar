@@ -1,14 +1,24 @@
 package dev.bornagojsic.calendar.data
 
+import android.content.ContentProviderOperation
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.database.ContentObserver
 import android.provider.CalendarContract
 import android.provider.CalendarContract.Calendars
+import android.provider.CalendarContract.Events
+import android.provider.CalendarContract.Reminders
 import android.provider.CalendarContract.Instances
 import android.net.Uri
+import dev.bornagojsic.calendar.domain.Draft
 import dev.bornagojsic.calendar.domain.Event
+import dev.bornagojsic.calendar.domain.EventDetails
+import dev.bornagojsic.calendar.domain.Source
+import dev.bornagojsic.calendar.domain.exdate
+import dev.bornagojsic.calendar.domain.shiftExdate
+import dev.bornagojsic.calendar.domain.untilBefore
+import dev.bornagojsic.calendar.domain.withUntil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -17,7 +27,9 @@ import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 
 data class CalendarInfo(
     val id: Long,
@@ -25,7 +37,11 @@ data class CalendarInfo(
     val account: String,
     val color: Int,
     val visible: Boolean,
+    val writable: Boolean,
 )
+
+/** Which occurrences of a recurring event an edit or delete applies to. */
+enum class Scope(val label: String) { THIS("This event"), FOLLOWING("This and following events"), ALL("All events") }
 
 /** Reads the system CalendarProvider. Requires READ_CALENDAR (and WRITE_CALENDAR for writes). */
 class CalendarRepository(private val resolver: ContentResolver) {
@@ -62,6 +78,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
             Calendars.ACCOUNT_NAME,
             Calendars.CALENDAR_COLOR,
             Calendars.VISIBLE,
+            Calendars.CALENDAR_ACCESS_LEVEL,
         )
         val sort = "${Calendars.ACCOUNT_NAME}, ${Calendars.CALENDAR_DISPLAY_NAME}"
         return resolver.query(Calendars.CONTENT_URI, projection, null, null, sort)?.use { c ->
@@ -74,6 +91,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
                             account = c.getString(2) ?: "",
                             color = c.getInt(3),
                             visible = c.getInt(4) != 0,
+                            writable = c.getInt(5) >= Calendars.CAL_ACCESS_CONTRIBUTOR,
                         )
                     )
                 }
@@ -96,7 +114,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
             Instances.DISPLAY_COLOR,
         )
         val sort = "${Instances.BEGIN}, ${Instances.END} DESC"
-        return resolver.query(uri, projection, "${Instances.VISIBLE} = 1", null, sort)?.use { c ->
+        return resolver.query(uri, projection, "${Instances.VISIBLE} = 1 AND (${Instances.STATUS} IS NULL OR ${Instances.STATUS} != ${Instances.STATUS_CANCELED})", null, sort)?.use { c ->
             buildList {
                 while (c.moveToNext()) {
                     add(
@@ -114,4 +132,241 @@ class CalendarRepository(private val resolver: ContentResolver) {
             }
         } ?: emptyList()
     }
+
+    /** The event row behind an occurrence, re-read on any provider change; null once it's gone. */
+    fun details(eventId: Long): Flow<EventDetails?> =
+        changes(CalendarContract.CONTENT_URI).map { queryDetails(eventId) }.flowOn(Dispatchers.IO)
+
+    private fun queryDetails(id: Long): EventDetails? {
+        val projection = arrayOf(
+            Events.CALENDAR_ID,
+            Events.CALENDAR_DISPLAY_NAME,
+            Events.CALENDAR_ACCESS_LEVEL,
+            Events.TITLE,
+            Events.EVENT_LOCATION,
+            Events.DESCRIPTION,
+            Events.ALL_DAY,
+            Events.EVENT_TIMEZONE,
+            Events.RRULE,
+            Events.DTSTART,
+            Events.ORIGINAL_ID,
+            Events.ORIGINAL_INSTANCE_TIME,
+            Events._SYNC_ID,
+            Events.EXDATE,
+            Events.DURATION,
+        )
+        val details = resolver.query(eventUri(id), projection, "${Events.DELETED} = 0", null, null)?.use { c ->
+            if (!c.moveToFirst()) return@use null
+            val originalId = if (c.isNull(10)) null else c.getLong(10)
+            EventDetails(
+                eventId = id,
+                calendarId = c.getLong(0),
+                calendarName = c.getString(1) ?: "",
+                writable = c.getInt(2) >= Calendars.CAL_ACCESS_CONTRIBUTOR,
+                title = c.getString(3) ?: "",
+                location = c.getString(4) ?: "",
+                description = c.getString(5) ?: "",
+                allDay = c.getInt(6) != 0,
+                zone = c.getString(7)?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneId.systemDefault(),
+                rrule = c.getString(8),
+                seriesId = originalId ?: id,
+                seriesStart = Instant.ofEpochMilli(c.getLong(9)),
+                originalTime = if (originalId == null || c.isNull(11)) null else Instant.ofEpochMilli(c.getLong(11)),
+                synced = !c.isNull(12),
+                exdate = c.getString(13),
+                duration = c.getString(14),
+                reminders = emptyList(),
+            )
+        } ?: return null
+        // An exception row has no RRULE of its own: the series rule and start live on its master.
+        val series = if (details.seriesId == id) details else resolver.query(
+            eventUri(details.seriesId), arrayOf(Events.RRULE, Events.DTSTART, Events._SYNC_ID, Events.EXDATE, Events.DURATION), null, null, null,
+        )?.use { c ->
+            if (c.moveToFirst()) details.copy(
+                rrule = c.getString(0),
+                seriesStart = Instant.ofEpochMilli(c.getLong(1)),
+                synced = !c.isNull(2),
+                exdate = c.getString(3),
+                duration = c.getString(4),
+            ) else null
+        } ?: details
+        val reminders = resolver.query(
+            Reminders.CONTENT_URI, arrayOf(Reminders.MINUTES), "${Reminders.EVENT_ID} = ?", arrayOf("$id"), null,
+        )?.use { c -> buildList { while (c.moveToNext()) add(c.getInt(0)) } } ?: emptyList()
+        return series.copy(reminders = reminders.distinct().sorted())
+    }
+
+    /** Creates an event ([src] null) or applies [draft] to [src] across [scope], in one batch. */
+    suspend fun save(draft: Draft, src: Source?, scope: Scope) = withContext(Dispatchers.IO) {
+        val ops = ArrayList<ContentProviderOperation>()
+        val d = src?.details
+        when {
+            d == null -> insert(ops, draft)
+            !d.recurring -> if (draft.calendarId != d.calendarId) {
+                // Moving between calendars: sync adapters expect a new row in the target calendar, not a changed CALENDAR_ID.
+                insert(ops, draft)
+                ops += ContentProviderOperation.newDelete(eventUri(d.eventId)).build()
+            } else {
+                update(ops, d.eventId, draft)
+            }
+            scope == Scope.THIS -> if (d.originalTime != null) {
+                update(ops, d.eventId, draft.copy(rrule = null), exception = true)
+            } else if (!d.synced) {
+                exclude(ops, d, src.originalTime)
+                insert(ops, draft.copy(rrule = null))
+            } else {
+                val at = ops.size
+                ops += ContentProviderOperation.newInsert(exceptionUri(d.seriesId))
+                    .withValues(values(draft.copy(rrule = null)).apply {
+                        // The provider rejects DTEND/RRULE on a new exception ("can't overwrite dtend"); it takes DURATION.
+                        remove(Events.CALENDAR_ID)
+                        remove(Events.RRULE)
+                        remove(Events.DTEND)
+                        put(Events.DURATION, draft.duration())
+                        put(Events.ORIGINAL_INSTANCE_TIME, src.originalTime.toEpochMilli())
+                    })
+                    .build()
+                // The provider may copy the master's reminders onto the exception; replace them.
+                ops += ContentProviderOperation.newDelete(Reminders.CONTENT_URI)
+                    .withSelection("${Reminders.EVENT_ID} = ?", arrayOf(""))
+                    .withSelectionBackReference(0, at)
+                    .build()
+                addReminders(ops, draft.reminders) { it.withValueBackReference(Reminders.EVENT_ID, at) }
+            }
+            // Editing the first occurrence's "following" is the whole series.
+            scope == Scope.ALL || src.originalTime == d.seriesStart -> {
+                // The draft holds this occurrence's times; move the series start, and its EXDATEs, by the same amount.
+                val shift = Duration.between(src.originalTime, draft.begin())
+                update(ops, d.seriesId, draft, begin = d.seriesStart + shift, exdate = d.exdate?.let { shiftExdate(it, shift) })
+            }
+            else -> {
+                truncate(ops, d, src.originalTime)
+                insert(ops, draft)
+            }
+        }
+        resolver.applyBatch(CalendarContract.AUTHORITY, ops)
+    }
+
+    /** Deletes [src] across [scope]. */
+    suspend fun delete(src: Source, scope: Scope) = withContext(Dispatchers.IO) {
+        val d = src.details
+        val ops = ArrayList<ContentProviderOperation>()
+        when {
+            !d.recurring || scope == Scope.ALL || (scope == Scope.FOLLOWING && src.originalTime == d.seriesStart) ->
+                ops += ContentProviderOperation.newDelete(eventUri(d.seriesId)).build()
+            // A single occurrence is removed by a cancelled exception, never by deleting a row.
+            scope == Scope.THIS && d.originalTime == null && !d.synced -> exclude(ops, d, src.originalTime)
+            scope == Scope.THIS -> ops += if (d.originalTime != null) {
+                ContentProviderOperation.newUpdate(eventUri(d.eventId))
+                    .withValue(Events.STATUS, Events.STATUS_CANCELED)
+                    // Timing columns make the provider re-expand, dropping the cancelled occurrence.
+                    .withValue(Events.DTSTART, src.event.begin.toEpochMilli())
+                    .withValue(Events.DTEND, src.event.end.toEpochMilli())
+                    .build()
+            } else {
+                ContentProviderOperation.newInsert(exceptionUri(d.seriesId))
+                    .withValue(Events.ORIGINAL_INSTANCE_TIME, src.originalTime.toEpochMilli())
+                    .withValue(Events.STATUS, Events.STATUS_CANCELED)
+                    .build()
+            }
+            else -> truncate(ops, d, src.originalTime)
+        }
+        resolver.applyBatch(CalendarContract.AUTHORITY, ops)
+    }
+
+    /**
+     * Drops the occurrence at [at] from the series via EXDATE. Used instead of an exception row while the series has
+     * no _SYNC_ID: the provider stops expanding a master that has exceptions but no sync id (seen on API 36).
+     */
+    private fun exclude(ops: ArrayList<ContentProviderOperation>, d: EventDetails, at: Instant) {
+        ops += ContentProviderOperation.newUpdate(eventUri(d.seriesId))
+            .withValues(seriesValues(d))
+            .withValue(Events.EXDATE, listOfNotNull(d.exdate?.takeIf { it.isNotBlank() }, exdate(at, d.allDay)).joinToString(","))
+            .build()
+    }
+
+    /** Ends the series just before [at] and drops its exceptions from [at] on. */
+    private fun truncate(ops: ArrayList<ContentProviderOperation>, d: EventDetails, at: Instant) {
+        ops += ContentProviderOperation.newUpdate(eventUri(d.seriesId))
+            .withValues(seriesValues(d))
+            .withValue(Events.RRULE, withUntil(d.rrule!!, untilBefore(at, d.allDay)))
+            .build()
+        ops += ContentProviderOperation.newDelete(Events.CONTENT_URI)
+            .withSelection("${Events.ORIGINAL_ID} = ? AND ${Events.ORIGINAL_INSTANCE_TIME} >= ?", arrayOf("${d.seriesId}", "${at.toEpochMilli()}"))
+            .build()
+    }
+
+    /**
+     * The master's timing columns, unchanged. The provider only re-expands instances when an update carries DTSTART
+     * (AOSP updateInstancesLocked), so rule-only edits must resend them.
+     */
+    private fun seriesValues(d: EventDetails) = ContentValues().apply {
+        put(Events.DTSTART, d.seriesStart.toEpochMilli())
+        put(Events.DURATION, d.duration)
+        put(Events.RRULE, d.rrule)
+    }
+
+    private fun insert(ops: ArrayList<ContentProviderOperation>, draft: Draft) {
+        val at = ops.size
+        ops += ContentProviderOperation.newInsert(Events.CONTENT_URI).withValues(values(draft)).build()
+        addReminders(ops, draft.reminders) { it.withValueBackReference(Reminders.EVENT_ID, at) }
+    }
+
+    private fun update(
+        ops: ArrayList<ContentProviderOperation>,
+        id: Long,
+        draft: Draft,
+        begin: Instant = draft.begin(),
+        exception: Boolean = false,
+        exdate: String? = null,
+    ) {
+        ops += ContentProviderOperation.newUpdate(eventUri(id))
+            .withValues(values(draft, begin).apply {
+                if (exception) remove(Events.CALENDAR_ID)
+                exdate?.let { put(Events.EXDATE, it) }
+            })
+            .build()
+        ops += ContentProviderOperation.newDelete(Reminders.CONTENT_URI)
+            .withSelection("${Reminders.EVENT_ID} = ?", arrayOf("$id"))
+            .build()
+        addReminders(ops, draft.reminders) { it.withValue(Reminders.EVENT_ID, id) }
+    }
+
+    private fun addReminders(
+        ops: ArrayList<ContentProviderOperation>,
+        minutes: List<Int>,
+        event: (ContentProviderOperation.Builder) -> ContentProviderOperation.Builder,
+    ) {
+        minutes.forEach {
+            ops += event(ContentProviderOperation.newInsert(Reminders.CONTENT_URI))
+                .withValue(Reminders.MINUTES, it)
+                .withValue(Reminders.METHOD, Reminders.METHOD_ALERT)
+                .build()
+        }
+    }
+
+    /** Event columns for [d], starting at [begin] (the draft's own start unless a series is being shifted). */
+    private fun values(d: Draft, begin: Instant = d.begin()) = ContentValues().apply {
+        put(Events.CALENDAR_ID, d.calendarId)
+        put(Events.TITLE, d.title)
+        put(Events.EVENT_LOCATION, d.location)
+        put(Events.DESCRIPTION, d.description)
+        put(Events.ALL_DAY, if (d.allDay) 1 else 0)
+        put(Events.EVENT_TIMEZONE, if (d.allDay) "UTC" else d.zone.id)
+        put(Events.HAS_ALARM, if (d.reminders.isEmpty()) 0 else 1)
+        put(Events.DTSTART, begin.toEpochMilli())
+        // Recurring events take DURATION instead of DTEND.
+        if (d.rrule != null) {
+            put(Events.RRULE, d.rrule)
+            put(Events.DURATION, d.duration())
+            putNull(Events.DTEND)
+        } else {
+            putNull(Events.RRULE)
+            putNull(Events.DURATION)
+            put(Events.DTEND, (begin + Duration.between(d.begin(), d.endInstant())).toEpochMilli())
+        }
+    }
+
+    private fun eventUri(id: Long) = ContentUris.withAppendedId(Events.CONTENT_URI, id)
+    private fun exceptionUri(seriesId: Long) = ContentUris.withAppendedId(Events.CONTENT_EXCEPTION_URI, seriesId)
 }

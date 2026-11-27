@@ -5,20 +5,22 @@ import android.content.Context
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.key
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.datastore.preferences.preferencesDataStore
+import dev.bornagojsic.calendar.ui.DateDialog
 import dev.bornagojsic.calendar.ui.day.TimeGridView
 import dev.bornagojsic.calendar.ui.month.MonthView
 import dev.bornagojsic.calendar.ui.schedule.ScheduleView
-import java.time.Instant
-import java.time.ZoneOffset
 import android.content.Intent
+import android.widget.Toast
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.FloatingActionButton
+import dev.bornagojsic.calendar.ui.event.EventEditor
+import dev.bornagojsic.calendar.ui.event.EventSheet
+import java.time.LocalDateTime
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
@@ -150,6 +152,14 @@ private fun CalendarScreen() {
     val scope = rememberCoroutineScope()
     val titleFormat = remember { DateTimeFormatter.ofPattern("LLLL yyyy") }
     var picking by rememberSaveable { mutableStateOf(false) }
+    val selected by vm.selected.collectAsStateWithLifecycle()
+    val details by vm.details.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val onError: (Throwable) -> Unit = { Toast.makeText(context, "Couldn't save: ${it.message}", Toast.LENGTH_LONG).show() }
+    fun create(start: LocalDateTime?) {
+        val ok = if (start == null) vm.create() else vm.create(start)
+        if (!ok) Toast.makeText(context, "No writable calendar", Toast.LENGTH_SHORT).show()
+    }
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
     ModalNavigationDrawer(
@@ -185,24 +195,39 @@ private fun CalendarScreen() {
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 )
             },
+            floatingActionButton = {
+                FloatingActionButton(onClick = { create(null) }) { Icon(Icons.Default.Add, contentDescription = "New event") }
+            },
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
                 // key: each view keeps its own pager/list state; switching views starts fresh at `date`.
                 key(mode) {
                     when (val m = mode) {
                         null -> Unit
-                        ViewMode.SCHEDULE -> ScheduleView(date, vm::setDate, vm::events)
+                        ViewMode.SCHEDULE -> ScheduleView(date, vm::setDate, vm::events, vm::select)
                         ViewMode.MONTH -> MonthView(date, vm::setDate, onDay = {
                             vm.setDate(it)
                             vm.setMode(ViewMode.DAY)
                         }, vm::events)
-                        else -> TimeGridView(m.days, date, vm::setDate, vm::events)
+                        else -> TimeGridView(m.days, date, vm::setDate, vm::events, vm::select, onSlot = { create(it) })
                     }
                 }
             }
         }
     }
-    if (picking) DatePickerDialog(date, onPick = { vm.setDate(it) }, onDismiss = { picking = false })
+    if (picking) DateDialog(date, onPick = { vm.setDate(it) }, onDismiss = { picking = false })
+    selected?.let { event ->
+        EventSheet(
+            event = event,
+            details = details?.takeIf { it.eventId == event.eventId },
+            onDismiss = { vm.select(null) },
+            onEdit = vm::edit,
+            onDelete = { src, s -> vm.delete(src, s, onError) },
+        )
+    }
+    vm.editor?.let {
+        EventEditor(it, calendars.orEmpty(), vm::update, onSave = { s -> vm.save(s, onError) }, onClose = vm::closeEditor)
+    }
 }
 
 @Composable
@@ -220,21 +245,4 @@ private fun TodayButton(onClick: () -> Unit) {
             )
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DatePickerDialog(date: LocalDate, onPick: (LocalDate) -> Unit, onDismiss: () -> Unit) {
-    // The M3 picker works in UTC-midnight millis.
-    val state = rememberDatePickerState(initialSelectedDateMillis = date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
-    androidx.compose.material3.DatePickerDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = {
-                state.selectedDateMillis?.let { onPick(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
-                onDismiss()
-            }) { Text("OK") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    ) { DatePicker(state) }
 }
