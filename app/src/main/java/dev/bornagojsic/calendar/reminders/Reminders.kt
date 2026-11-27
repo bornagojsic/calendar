@@ -60,6 +60,8 @@ class ReminderReceiver : BroadcastReceiver() {
         thread {
             try {
                 fireDue(context)
+            } catch (_: SecurityException) {
+                // Calendar access was revoked: nothing to read, and a crash here would show a dialog.
             } finally {
                 pending.finish()
             }
@@ -106,6 +108,8 @@ class SnoozeReceiver : BroadcastReceiver() {
                 thread {
                     try {
                         current(context, alert)?.let { notify(context, it) }
+                    } catch (_: SecurityException) {
+                        // Calendar access was revoked: nothing to read, and a crash here would show a dialog.
                     } finally {
                         pending.finish()
                     }
