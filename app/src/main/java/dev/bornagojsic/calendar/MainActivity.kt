@@ -1,6 +1,23 @@
 package dev.bornagojsic.calendar
 
 import android.Manifest
+import android.content.Context
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.key
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.datastore.preferences.preferencesDataStore
+import dev.bornagojsic.calendar.ui.day.TimeGridView
+import dev.bornagojsic.calendar.ui.month.MonthView
+import dev.bornagojsic.calendar.ui.schedule.ScheduleView
+import java.time.Instant
+import java.time.ZoneOffset
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -8,6 +25,7 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -115,41 +133,108 @@ private fun PermissionScreen(onResult: () -> Unit) {
     }
 }
 
+private val Context.settings by preferencesDataStore("settings")
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CalendarScreen() {
     // Application context: the ViewModel outlives the Activity.
-    val resolver = LocalContext.current.applicationContext.contentResolver
+    val app = LocalContext.current.applicationContext
     val vm: CalendarViewModel = viewModel(factory = viewModelFactory {
-        initializer { CalendarViewModel(CalendarRepository(resolver)) }
+        initializer { CalendarViewModel(CalendarRepository(app.contentResolver), app.settings) }
     })
     val calendars by vm.calendars.collectAsStateWithLifecycle()
+    val mode by vm.mode.collectAsStateWithLifecycle()
+    val date by vm.date.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    val title = remember { LocalDate.now().format(DateTimeFormatter.ofPattern("LLLL yyyy")) }
+    val titleFormat = remember { DateTimeFormatter.ofPattern("LLLL yyyy") }
+    var picking by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        drawerContent = { CalendarDrawer(calendars, onToggle = { vm.setVisible(it.id, !it.visible) }) },
+        drawerContent = {
+            CalendarDrawer(
+                mode = mode,
+                onMode = {
+                    vm.setMode(it)
+                    scope.launch { drawerState.close() }
+                },
+                calendars = calendars,
+                onToggle = { vm.setVisible(it.id, !it.visible) },
+            )
+        },
     ) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
                 TopAppBar(
-                    title = { Text(title) },
+                    title = {
+                        Text(
+                            date.format(titleFormat),
+                            modifier = Modifier.clickable(onClickLabel = "Pick a date") { picking = true },
+                        )
+                    },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             Icon(Icons.Default.Menu, contentDescription = "Open menu")
                         }
                     },
+                    actions = { TodayButton(onClick = { vm.setDate(LocalDate.now()) }) },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 )
             },
         ) { padding ->
-            // Placeholder until the Schedule view lands in milestone 2.
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("Views coming in milestone 2", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                // key: each view keeps its own pager/list state; switching views starts fresh at `date`.
+                key(mode) {
+                    when (val m = mode) {
+                        null -> Unit
+                        ViewMode.SCHEDULE -> ScheduleView(date, vm::setDate, vm::events)
+                        ViewMode.MONTH -> MonthView(date, vm::setDate, onDay = {
+                            vm.setDate(it)
+                            vm.setMode(ViewMode.DAY)
+                        }, vm::events)
+                        else -> TimeGridView(m.days, date, vm::setDate, vm::events)
+                    }
+                }
             }
         }
     }
+    if (picking) DatePickerDialog(date, onPick = { vm.setDate(it) }, onDismiss = { picking = false })
+}
+
+@Composable
+private fun TodayButton(onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Box(
+            Modifier.size(24.dp).border(1.5.dp, MaterialTheme.colorScheme.onSurface, MaterialTheme.shapes.extraSmall),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                LocalDate.now().dayOfMonth.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.semantics { contentDescription = "Today" },
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DatePickerDialog(date: LocalDate, onPick: (LocalDate) -> Unit, onDismiss: () -> Unit) {
+    // The M3 picker works in UTC-midnight millis.
+    val state = rememberDatePickerState(initialSelectedDateMillis = date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
+    androidx.compose.material3.DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                state.selectedDateMillis?.let { onPick(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
+                onDismiss()
+            }) { Text("OK") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    ) { DatePicker(state) }
 }
