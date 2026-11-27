@@ -31,31 +31,36 @@ fun CalendarDrawer(
     onToggle: (CalendarInfo) -> Unit,
 ) {
     ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Text(
-            "Calendar",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
-        )
-        HorizontalDivider()
-        ViewMode.entries.forEach {
-            NavigationDrawerItem(
-                label = { Text(it.label) },
-                selected = it == mode,
-                onClick = { onMode(it) },
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-            )
-        }
-        HorizontalDivider(Modifier.padding(top = 8.dp))
-        when {
-            calendars == null -> Unit
-            calendars.isEmpty() -> Text(
-                "No calendars on this device. Add your Nextcloud account in DAVx5.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(24.dp),
-            )
-            else -> LazyColumn {
-                calendars.groupBy { it.account }.forEach { (account, list) ->
+        // One list for everything, so the calendars stay reachable when the drawer is short (landscape).
+        LazyColumn {
+            item {
+                Text(
+                    "Calendar",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+                )
+                HorizontalDivider()
+            }
+            items(ViewMode.entries) {
+                NavigationDrawerItem(
+                    label = { Text(it.label) },
+                    selected = it == mode,
+                    onClick = { onMode(it) },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                )
+            }
+            item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
+            when {
+                calendars == null -> Unit
+                calendars.isEmpty() -> item {
+                    Text(
+                        "No calendars on this device. Add your Nextcloud account in DAVx5.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(24.dp),
+                    )
+                }
+                else -> calendars.groupBy { it.account }.forEach { (account, list) ->
                     item(key = "account:$account") {
                         Text(
                             account,

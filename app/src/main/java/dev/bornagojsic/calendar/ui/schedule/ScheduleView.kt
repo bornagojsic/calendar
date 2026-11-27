@@ -3,6 +3,8 @@ package dev.bornagojsic.calendar.ui.schedule
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -47,11 +49,13 @@ private const val PAST_DAYS = 90L
 private const val FUTURE_DAYS = 365L
 private const val MAX_YEARS = 10L
 
-/** Endless list of days that have events, plus today. The window grows by a year when you scroll near either end. */
+/** Endless list of days that have events, plus today and the date it opened on. The window grows by a year when you scroll near either end. */
 @Composable
 fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader) {
     var from by rememberSaveable { mutableLongStateOf(date.minusDays(PAST_DAYS).toEpochDay()) }
     var to by rememberSaveable { mutableLongStateOf(date.plusDays(FUTURE_DAYS).toEpochDay()) }
+    // The date the window was centered on; always gets a row, like today, so the list has something to land on.
+    var anchor by rememberSaveable { mutableLongStateOf(date.toEpochDay()) }
     // The last loaded window and its events. Kept across window changes so the list doesn't blank out while a wider range loads.
     var loaded by remember { mutableStateOf<Pair<LongRange, List<Event>>?>(null) }
     LaunchedEffect(from, to) {
@@ -62,13 +66,15 @@ fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader
         if (date.toEpochDay() !in from..to) {
             from = date.minusDays(PAST_DAYS).toEpochDay()
             to = date.plusDays(FUTURE_DAYS).toEpochDay()
+            anchor = date.toEpochDay()
         }
     }
     val (window, events) = loaded ?: return
     val zone = ZoneId.systemDefault()
     val today = LocalDate.now()
-    val days = remember(window, events, today) {
-        groupByDay(events, zone, LocalDate.ofEpochDay(window.first), LocalDate.ofEpochDay(window.last), today)
+    // Today anchors the list; when it's outside the window (month picker), the picked date does.
+    val days = remember(window, events, anchor, today) {
+        groupByDay(events, zone, LocalDate.ofEpochDay(window.first), LocalDate.ofEpochDay(window.last), listOf(today, LocalDate.ofEpochDay(anchor)))
     }
 
     // Row i stands for every date in (days[i-1], days[i]], so empty dates map to the next day with events.
@@ -104,26 +110,29 @@ fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader
     }
 
     val monthFormat = remember { DateTimeFormatter.ofPattern("LLLL yyyy") }
-    LazyColumn(state = list, modifier = Modifier.fillMaxSize()) {
-        itemsIndexed(days, key = { _, (d, _) -> d.toEpochDay() }) { i, (day, dayEvents) ->
-            Column {
-                if (i == 0 || days[i - 1].first.month != day.month || days[i - 1].first.year != day.year) {
-                    Text(
-                        day.format(monthFormat),
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
-                    )
+    // Bottom padding of almost a screen, so even the last rows (today, a picked date) can sit at the top.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = maxHeight - 120.dp)) {
+            itemsIndexed(days, key = { _, (d, _) -> d.toEpochDay() }) { i, (day, dayEvents) ->
+                Column {
+                    if (i == 0 || days[i - 1].first.month != day.month || days[i - 1].first.year != day.year) {
+                        Text(
+                            day.format(monthFormat),
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
+                        )
+                    }
+                    DayRow(day, day == today, dayEvents, zone)
                 }
-                DayRow(day, day == today, dayEvents, zone)
             }
         }
     }
 }
 
-/** Days in [first, last] with their events; multi-day events appear on each day. Today is always present. */
-private fun groupByDay(events: List<Event>, zone: ZoneId, first: LocalDate, last: LocalDate, today: LocalDate): List<Pair<LocalDate, List<Event>>> {
+/** Days in [first, last] with their events; multi-day events appear on each day. [always] days in range get a row even when empty. */
+private fun groupByDay(events: List<Event>, zone: ZoneId, first: LocalDate, last: LocalDate, always: List<LocalDate>): List<Pair<LocalDate, List<Event>>> {
     val map = sortedMapOf<LocalDate, MutableList<Event>>()
-    if (today in first..last) map[today] = mutableListOf()
+    always.filter { it in first..last }.forEach { map[it] = mutableListOf() }
     for (e in events) {
         val r = e.days(zone)
         var d = maxOf(r.start, first)
