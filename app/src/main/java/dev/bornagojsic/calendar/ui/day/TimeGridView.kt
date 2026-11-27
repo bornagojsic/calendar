@@ -51,6 +51,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.bornagojsic.calendar.domain.Event
 import dev.bornagojsic.calendar.domain.layoutDay
 import dev.bornagojsic.calendar.domain.weekStart
+import dev.bornagojsic.calendar.ui.firstDayOfWeek
 import dev.bornagojsic.calendar.ui.DatePager
 import dev.bornagojsic.calendar.ui.EventChip
 import dev.bornagojsic.calendar.ui.EventLoader
@@ -79,8 +80,9 @@ fun TimeGridView(
     onEvent: (Event) -> Unit,
     onSlot: (LocalDateTime) -> Unit,
 ) {
-    // Week pages start on the locale's first day; Day and 3-day pages start on the date they opened on.
-    val base = LocalDate.ofEpochDay(rememberSaveable { (if (days == 7) weekStart(date) else date).toEpochDay() })
+    // Week pages start on the week's first day; Day and 3-day pages start on the date they opened on.
+    val first = firstDayOfWeek()
+    val base = LocalDate.ofEpochDay(rememberSaveable { (if (days == 7) weekStart(date, first) else date).toEpochDay() })
     var hourHeight by rememberSaveable { mutableFloatStateOf(48f) }
     val density = LocalDensity.current
     val scroll = rememberScrollState(with(density) { (hourHeight.dp * 7).roundToPx() }) // open at 7:00

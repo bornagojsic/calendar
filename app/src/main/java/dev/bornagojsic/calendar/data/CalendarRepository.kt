@@ -60,6 +60,13 @@ class CalendarRepository(private val resolver: ContentResolver) {
     fun instances(begin: Instant, end: Instant): Flow<List<Event>> =
         changes(CalendarContract.CONTENT_URI).map { queryInstances(begin, end) }.flowOn(Dispatchers.IO)
 
+    /**
+     * Occurrences in [begin, end) matching [query], re-queried on any provider change. The provider's search URI
+     * matches every word (case-insensitive LIKE) against title, description, location and attendee names/emails.
+     */
+    fun search(query: String, begin: Instant, end: Instant): Flow<List<Event>> =
+        changes(CalendarContract.CONTENT_URI).map { queryInstances(begin, end, query) }.flowOn(Dispatchers.IO)
+
     /** The occurrence of [eventId] starting at [begin], or null if it's gone or its calendar is hidden. */
     suspend fun instance(eventId: Long, begin: Instant): Event? = withContext(Dispatchers.IO) {
         queryInstances(begin, begin).find { it.eventId == eventId && it.begin == begin }
@@ -110,10 +117,11 @@ class CalendarRepository(private val resolver: ContentResolver) {
         } ?: emptyList()
     }
 
-    private fun queryInstances(begin: Instant, end: Instant): List<Event> {
-        val uri = Instances.CONTENT_URI.buildUpon().also {
+    private fun queryInstances(begin: Instant, end: Instant, search: String? = null): List<Event> {
+        val uri = (if (search == null) Instances.CONTENT_URI else Instances.CONTENT_SEARCH_URI).buildUpon().also {
             ContentUris.appendId(it, begin.toEpochMilli())
             ContentUris.appendId(it, end.toEpochMilli())
+            search?.let(it::appendPath)
         }.build()
         val projection = arrayOf(
             Instances._ID,

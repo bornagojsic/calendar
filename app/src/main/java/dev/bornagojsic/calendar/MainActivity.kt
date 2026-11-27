@@ -1,6 +1,22 @@
 package dev.bornagojsic.calendar
 
 import android.Manifest
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.ImeAction
+import dev.bornagojsic.calendar.ui.LocalPrefs
+import dev.bornagojsic.calendar.domain.Prefs
+import dev.bornagojsic.calendar.ui.schedule.SearchResults
+import dev.bornagojsic.calendar.ui.settings.SettingsScreen
 import android.content.Context
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -172,6 +188,10 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
     var picking by rememberSaveable { mutableStateOf(false) }
     val selected by vm.selected.collectAsStateWithLifecycle()
     val details by vm.details.collectAsStateWithLifecycle()
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
+    val query by vm.query.collectAsStateWithLifecycle()
+    val results by vm.results.collectAsStateWithLifecycle()
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val onError: (Throwable) -> Unit = { Toast.makeText(context, "Couldn't save: ${it.message}", Toast.LENGTH_LONG).show() }
     fun create(start: LocalDateTime?) {
@@ -190,73 +210,117 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
         ) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+    BackHandler(enabled = query != null) { vm.search(null) }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            CalendarDrawer(
-                mode = mode,
-                onMode = {
-                    vm.setMode(it)
-                    scope.launch { drawerState.close() }
-                },
-                calendars = calendars,
-                onToggle = { vm.setVisible(it.id, !it.visible) },
-            )
-        },
-    ) {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Text(
-                            date.format(titleFormat),
-                            modifier = Modifier.clickable(onClickLabel = "Pick a date") { picking = true },
-                        )
+    // Settings reach every view, sheet and dialog below.
+    CompositionLocalProvider(LocalPrefs provides (prefs ?: Prefs())) {
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                CalendarDrawer(
+                    mode = mode,
+                    onMode = {
+                        vm.setMode(it)
+                        scope.launch { drawerState.close() }
                     },
-                    navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Open menu")
-                        }
+                    calendars = calendars,
+                    onToggle = { vm.setVisible(it.id, !it.visible) },
+                    onSettings = {
+                        settingsOpen = true
+                        scope.launch { drawerState.close() }
                     },
-                    actions = { TodayButton(onClick = { vm.setDate(LocalDate.now()) }) },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 )
             },
-            floatingActionButton = {
-                FloatingActionButton(onClick = { create(null) }) { Icon(Icons.Default.Add, contentDescription = "New event") }
-            },
-        ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
-                // key: each view keeps its own pager/list state; switching views starts fresh at `date`.
-                key(mode) {
-                    when (val m = mode) {
-                        null -> Unit
-                        ViewMode.SCHEDULE -> ScheduleView(date, vm::setDate, vm::events, vm::select)
-                        ViewMode.MONTH -> MonthView(date, vm::setDate, onDay = {
-                            vm.setDate(it)
-                            vm.setMode(ViewMode.DAY)
-                        }, vm::events)
-                        else -> TimeGridView(m.days, date, vm::setDate, vm::events, vm::select, onSlot = { create(it) })
+        ) {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                topBar = {
+                    if (query != null) SearchBar(query.orEmpty(), vm::search) else TopAppBar(
+                        title = {
+                            Text(
+                                date.format(titleFormat),
+                                modifier = Modifier.clickable(onClickLabel = "Pick a date") { picking = true },
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, contentDescription = "Open menu")
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { vm.search("") }) { Icon(Icons.Default.Search, contentDescription = "Search") }
+                            TodayButton(onClick = { vm.setDate(LocalDate.now()) })
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                    )
+                },
+                floatingActionButton = {
+                    if (query == null) FloatingActionButton(onClick = { create(null) }) { Icon(Icons.Default.Add, contentDescription = "New event") }
+                },
+            ) { padding ->
+                Box(Modifier.fillMaxSize().padding(padding)) {
+                    // key: each view keeps its own pager/list state; switching views (or the week start) starts fresh at `date`.
+                    if (query != null) results?.let { SearchResults(it, vm::select) } else key(mode, prefs?.weekStart) {
+                        when (val m = mode.takeIf { prefs != null }) {
+                            null -> Unit
+                            ViewMode.SCHEDULE -> ScheduleView(date, vm::setDate, vm::events, vm::select)
+                            ViewMode.MONTH -> MonthView(date, vm::setDate, onDay = {
+                                vm.setDate(it)
+                                vm.setMode(ViewMode.DAY)
+                            }, vm::events)
+                            else -> TimeGridView(m.days, date, vm::setDate, vm::events, vm::select, onSlot = { create(it) })
+                        }
                     }
                 }
             }
         }
+        if (settingsOpen) prefs?.let { SettingsScreen(it, vm::setWeekStart, vm::setClock24, onClose = { settingsOpen = false }) }
+        if (picking) DateDialog(date, onPick = { vm.setDate(it) }, onDismiss = { picking = false })
+        selected?.let { event ->
+            EventSheet(
+                event = event,
+                details = details?.takeIf { it.eventId == event.eventId },
+                onDismiss = { vm.select(null) },
+                onEdit = vm::edit,
+                onDelete = { src, s -> vm.delete(src, s, onError) },
+            )
+        }
+        vm.editor?.let {
+            EventEditor(it, calendars.orEmpty(), vm.writing, vm::update, onSave = { s -> vm.save(s, onError) }, onClose = vm::closeEditor)
+        }
     }
-    if (picking) DateDialog(date, onPick = { vm.setDate(it) }, onDismiss = { picking = false })
-    selected?.let { event ->
-        EventSheet(
-            event = event,
-            details = details?.takeIf { it.eventId == event.eventId },
-            onDismiss = { vm.select(null) },
-            onEdit = vm::edit,
-            onDelete = { src, s -> vm.delete(src, s, onError) },
-        )
-    }
-    vm.editor?.let {
-        EventEditor(it, calendars.orEmpty(), vm.writing, vm::update, onSave = { s -> vm.save(s, onError) }, onClose = vm::closeEditor)
-    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchBar(query: String, onQuery: (String?) -> Unit) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    TopAppBar(
+        title = {
+            TextField(
+                query,
+                onQuery,
+                placeholder = { Text("Search") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                ),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus),
+            )
+        },
+        navigationIcon = {
+            IconButton(onClick = { onQuery(null) }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search") }
+        },
+        actions = {
+            if (query.isNotEmpty()) IconButton(onClick = { onQuery("") }) { Icon(Icons.Default.Close, contentDescription = "Clear") }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+    )
 }
 
 @Composable

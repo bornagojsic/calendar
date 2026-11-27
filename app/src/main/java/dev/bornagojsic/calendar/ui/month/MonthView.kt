@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.bornagojsic.calendar.domain.Event
 import dev.bornagojsic.calendar.domain.weekStart
+import dev.bornagojsic.calendar.ui.firstDayOfWeek
 import dev.bornagojsic.calendar.ui.DatePager
 import dev.bornagojsic.calendar.ui.EventChip
 import dev.bornagojsic.calendar.ui.EventLoader
@@ -52,7 +53,7 @@ fun MonthView(date: LocalDate, onDate: (LocalDate) -> Unit, onDay: (LocalDate) -
         rangeOf = { BASE.plusMonths(it.toLong()).let { m -> m.atDay(1)..m.atEndOfMonth() } },
         modifier = Modifier.fillMaxSize(),
     ) { range ->
-        val first = weekStart(range.start)
+        val first = weekStart(range.start, firstDayOfWeek())
         val events by remember(range) { load(first, first.plusDays(41)) }.collectAsStateWithLifecycle(emptyList())
         MonthPage(YearMonth.from(range.start), first, events, onDay)
     }

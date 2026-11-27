@@ -1,6 +1,5 @@
 package dev.bornagojsic.calendar.ui.event
 
-import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -65,7 +64,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -79,6 +77,8 @@ import dev.bornagojsic.calendar.domain.Rule
 import dev.bornagojsic.calendar.ui.DateDialog
 import dev.bornagojsic.calendar.ui.eventColor
 import dev.bornagojsic.calendar.ui.rememberTimeFormat
+import dev.bornagojsic.calendar.ui.firstDayOfWeek
+import dev.bornagojsic.calendar.ui.is24Hour
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -299,7 +299,7 @@ private fun PlainField(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TimeDialog(time: LocalTime, onPick: (LocalTime) -> Unit, onDismiss: () -> Unit) {
-    val state = rememberTimePickerState(time.hour, time.minute, DateFormat.is24HourFormat(LocalContext.current))
+    val state = rememberTimePickerState(time.hour, time.minute, is24Hour())
     AlertDialog(
         onDismissRequest = onDismiss,
         text = { TimePicker(state) },
@@ -398,7 +398,8 @@ private fun RecurrenceDialog(initial: Rule, onDone: (Rule) -> Unit, onDismiss: (
                 }
                 if (freq == Freq.WEEKLY) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        DayOfWeek.entries.forEach { day ->
+                        val first = firstDayOfWeek()
+                        DayOfWeek.entries.sortedBy { (it.value - first.value + 7) % 7 }.forEach { day ->
                             FilterChip(
                                 day in days,
                                 { days = if (day in days) days - day else days + day },
