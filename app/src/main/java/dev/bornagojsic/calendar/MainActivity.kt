@@ -74,14 +74,24 @@ import dev.bornagojsic.calendar.data.CalendarRepository
 import dev.bornagojsic.calendar.ui.drawer.CalendarDrawer
 import dev.bornagojsic.calendar.ui.theme.CalendarTheme
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
+import android.os.Build
+import androidx.compose.runtime.LaunchedEffect
+import dev.bornagojsic.calendar.reminders.EXTRA_BEGIN
+import dev.bornagojsic.calendar.reminders.EXTRA_EVENT_ID
 import java.time.format.DateTimeFormatter
 
 private val PERMISSIONS = arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
 
 class MainActivity : ComponentActivity() {
+    /** The occurrence a tapped reminder points at, until the screen shows it. */
+    private var opening by mutableStateOf<Pair<Long, Instant>?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Only on a fresh start: after rotation the sheet is already open, or the user closed it.
+        if (savedInstanceState == null) opening = intent.reminder()
         // Dark-only app: force light system bar icons even when the phone is in light mode.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
@@ -96,11 +106,19 @@ class MainActivity : ComponentActivity() {
                         granted = hasPermissions()
                         onPauseOrDispose {}
                     }
-                    if (granted) CalendarScreen() else PermissionScreen(onResult = { granted = hasPermissions() })
+                    if (granted) CalendarScreen(opening, onOpened = { opening = null }) else PermissionScreen(onResult = { granted = hasPermissions() })
                 }
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.reminder()?.let { opening = it }
+    }
+
+    private fun Intent.reminder() = getLongExtra(EXTRA_EVENT_ID, -1).takeIf { it >= 0 }
+        ?.let { it to Instant.ofEpochMilli(getLongExtra(EXTRA_BEGIN, 0)) }
 
     private fun hasPermissions() = PERMISSIONS.all {
         ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
@@ -139,7 +157,7 @@ private val Context.settings by preferencesDataStore("settings")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CalendarScreen() {
+private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) {
     // Application context: the ViewModel outlives the Activity.
     val app = LocalContext.current.applicationContext
     val vm: CalendarViewModel = viewModel(factory = viewModelFactory {
@@ -159,6 +177,17 @@ private fun CalendarScreen() {
     fun create(start: LocalDateTime?) {
         val ok = if (start == null) vm.create() else vm.create(start)
         if (!ok) Toast.makeText(context, "No writable calendar", Toast.LENGTH_SHORT).show()
+    }
+    LaunchedEffect(opening) {
+        opening?.let { (id, begin) -> vm.open(id, begin) }
+        onOpened()
+    }
+    // Not part of the gate above: the calendar works without reminders. The system stops asking after two denials.
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
