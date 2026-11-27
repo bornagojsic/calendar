@@ -7,6 +7,7 @@ import android.content.ContentValues
 import android.database.ContentObserver
 import android.provider.CalendarContract
 import android.provider.CalendarContract.Calendars
+import android.provider.CalendarContract.Colors
 import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Reminders
 import android.provider.CalendarContract.Instances
@@ -38,10 +39,14 @@ data class CalendarInfo(
     val id: Long,
     val name: String,
     val account: String,
+    val accountType: String,
     val color: Int,
     val visible: Boolean,
     val writable: Boolean,
 )
+
+/** One entry of an account's event color palette; [key] is what the event row stores. */
+data class EventColor(val key: String, val color: Int)
 
 /** The reminders the editor shows and rewrites; email and other methods are left alone. */
 private val ALERTS = "${Reminders.METHOD} IN (${Reminders.METHOD_DEFAULT}, ${Reminders.METHOD_ALERT})"
@@ -89,6 +94,15 @@ class CalendarRepository(private val resolver: ContentResolver) {
         resolver.update(ContentUris.withAppendedId(Calendars.CONTENT_URI, id), values, null, null)
     }
 
+    /** The event colors [cal]'s account offers (DAVx5 fills these in); empty when it offers none. */
+    suspend fun palette(cal: CalendarInfo): List<EventColor> = withContext(Dispatchers.IO) {
+        resolver.query(
+            Colors.CONTENT_URI, arrayOf(Colors.COLOR_KEY, Colors.COLOR),
+            "${Colors.ACCOUNT_NAME} = ? AND ${Colors.ACCOUNT_TYPE} = ? AND ${Colors.COLOR_TYPE} = ${Colors.TYPE_EVENT}",
+            arrayOf(cal.account, cal.accountType), null,
+        )?.use { c -> buildList { while (c.moveToNext()) add(EventColor(c.getString(0), c.getInt(1))) } } ?: emptyList()
+    }
+
     private fun queryCalendars(): List<CalendarInfo> {
         val projection = arrayOf(
             Calendars._ID,
@@ -97,6 +111,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
             Calendars.CALENDAR_COLOR,
             Calendars.VISIBLE,
             Calendars.CALENDAR_ACCESS_LEVEL,
+            Calendars.ACCOUNT_TYPE,
         )
         val sort = "${Calendars.ACCOUNT_NAME}, ${Calendars.CALENDAR_DISPLAY_NAME}"
         return resolver.query(Calendars.CONTENT_URI, projection, null, null, sort)?.use { c ->
@@ -110,6 +125,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
                             color = c.getInt(3),
                             visible = c.getInt(4) != 0,
                             writable = c.getInt(5) >= Calendars.CAL_ACCESS_CONTRIBUTOR,
+                            accountType = c.getString(6) ?: "",
                         )
                     )
                 }
@@ -174,6 +190,8 @@ class CalendarRepository(private val resolver: ContentResolver) {
             Events.EXDATE,
             Events.DURATION,
             Events.RDATE,
+            Events.EVENT_COLOR_KEY,
+            Events.EVENT_COLOR,
         )
         val details = resolver.query(eventUri(id), projection, "${Events.DELETED} = 0", null, null)?.use { c ->
             if (!c.moveToFirst()) return@use null
@@ -197,6 +215,8 @@ class CalendarRepository(private val resolver: ContentResolver) {
                 exdate = c.getString(13),
                 duration = c.getString(14),
                 reminders = emptyList(),
+                colorKey = c.getString(16),
+                color = if (c.isNull(17)) null else c.getInt(17),
             )
         } ?: return null
         // An exception row has no RRULE of its own: the series rule and start live on its master.
@@ -247,7 +267,16 @@ class CalendarRepository(private val resolver: ContentResolver) {
                         remove(Events.DTEND)
                         put(Events.DURATION, draft.duration())
                         put(Events.ORIGINAL_INSTANCE_TIME, src.originalTime.toEpochMilli())
+                        // The provider crashes on a new exception carrying a color key (seen on API 36); it's set below.
+                        remove(Events.EVENT_COLOR_KEY)
                     })
+                    .build()
+                // Always: the provider copies the master's key into the exception, and "Calendar color" must clear it.
+                ops += ContentProviderOperation.newUpdate(Events.CONTENT_URI)
+                    .withSelection("${Events._ID} = ?", arrayOf(""))
+                    .withSelectionBackReference(0, at)
+                    .withValue(Events.EVENT_COLOR_KEY, draft.colorKey)
+                    .withValue(Events.EVENT_COLOR, draft.color)
                     .build()
                 // The provider may copy the master's reminders onto the exception; replace them.
                 ops += ContentProviderOperation.newDelete(Reminders.CONTENT_URI)
@@ -413,6 +442,9 @@ class CalendarRepository(private val resolver: ContentResolver) {
         put(Events.DESCRIPTION, d.description)
         put(Events.ALL_DAY, if (d.allDay) 1 else 0)
         put(Events.EVENT_TIMEZONE, if (d.allDay) "UTC" else d.zone.id)
+        // A key makes the provider fill EVENT_COLOR from the palette; an unkeyed color (set by another app) is kept as is.
+        put(Events.EVENT_COLOR_KEY, d.colorKey)
+        if (d.color == null) putNull(Events.EVENT_COLOR) else put(Events.EVENT_COLOR, d.color)
         put(Events.HAS_ALARM, if (d.reminders.isEmpty()) 0 else 1)
         put(Events.DTSTART, begin.toEpochMilli())
         // Recurring events take DURATION instead of DTEND.

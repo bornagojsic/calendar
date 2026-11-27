@@ -70,6 +70,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.bornagojsic.calendar.Editor
 import dev.bornagojsic.calendar.data.CalendarInfo
+import dev.bornagojsic.calendar.data.EventColor
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import dev.bornagojsic.calendar.data.Scope
 import dev.bornagojsic.calendar.domain.Draft
 import dev.bornagojsic.calendar.domain.Freq
@@ -89,7 +94,7 @@ import java.time.format.TextStyle
 
 private val REMINDER_CHOICES = listOf(0, 5, 10, 15, 30, 60, 120, 1_440, 2_880, 10_080)
 
-private enum class Dialog { START_DATE, START_TIME, END_DATE, END_TIME, ZONE, REPEAT, CUSTOM, CALENDAR, REMINDER, SCOPE }
+private enum class Dialog { START_DATE, START_TIME, END_DATE, END_TIME, ZONE, REPEAT, CUSTOM, CALENDAR, COLOR, REMINDER, SCOPE }
 
 /** Full-screen editor for a new or existing event. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,6 +102,8 @@ private enum class Dialog { START_DATE, START_TIME, END_DATE, END_TIME, ZONE, RE
 fun EventEditor(
     editor: Editor,
     calendars: List<CalendarInfo>,
+    /** The draft calendar's account palette; the color row hides when it's empty. */
+    palette: List<EventColor>,
     writing: Boolean,
     onChange: (Draft) -> Unit,
     onSave: (Scope) -> Unit,
@@ -149,6 +156,12 @@ fun EventEditor(
                 EditorRow(null, if (canMove) Modifier.clickable { dialog = Dialog.CALENDAR } else Modifier) {
                     Box(Modifier.size(12.dp).background(eventColor(calendar?.color ?: 0), CircleShape))
                     Text(calendar?.name ?: "", Modifier.padding(start = 12.dp))
+                }
+                if (palette.isNotEmpty()) {
+                    EditorRow(null, Modifier.clickable { dialog = Dialog.COLOR }) {
+                        Box(Modifier.size(12.dp).background(eventColor(d.color ?: calendar?.color ?: 0), CircleShape))
+                        Text(d.colorKey ?: if (d.color != null) "Custom color" else "Calendar color", Modifier.padding(start = 12.dp))
+                    }
                 }
                 HorizontalDivider()
                 d.reminders.forEach { m ->
@@ -210,7 +223,12 @@ fun EventEditor(
             },
             onDismiss = ::dismiss,
         )
-        Dialog.CALENDAR -> ChoiceDialog(writable, calendar, { it.name }, { onChange(d.copy(calendarId = it.id)) }, ::dismiss)
+        Dialog.CALENDAR -> ChoiceDialog(writable, calendar, { it.name }, {
+            // Color keys belong to an account's palette; another account may not have this one.
+            val sameAccount = it.account == calendar?.account && it.accountType == calendar.accountType
+            onChange(if (sameAccount) d.copy(calendarId = it.id) else d.copy(calendarId = it.id, colorKey = null, color = null))
+        }, ::dismiss)
+        Dialog.COLOR -> ColorDialog(palette, d.colorKey, calendar?.color ?: 0, { onChange(d.copy(colorKey = it?.key, color = it?.color)) }, ::dismiss)
         Dialog.REMINDER -> ChoiceDialog(
             REMINDER_CHOICES - d.reminders.toSet(), null, ::reminderLabel,
             { onChange(d.copy(reminders = (d.reminders + it).sorted())) }, ::dismiss,
@@ -357,6 +375,40 @@ private fun <T> ChoiceDialog(items: List<T>, selected: T?, label: (T) -> String,
                         RadioButton(it == selected, onClick = null)
                         Text(label(it), Modifier.padding(start = 12.dp, top = 12.dp, bottom = 12.dp))
                     }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Swatches of the account palette; the first one (null) is the calendar color. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ColorDialog(palette: List<EventColor>, selected: String?, calendarColor: Int, onPick: (EventColor?) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        text = {
+            FlowRow(
+                Modifier.verticalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                (listOf(null) + palette).forEach { c ->
+                    val picked = c?.key == selected
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .background(eventColor(c?.color ?: calendarColor), CircleShape)
+                            .then(if (picked) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
+                            .clip(CircleShape)
+                            .selectable(picked, role = Role.RadioButton) {
+                                onDismiss()
+                                onPick(c)
+                            }
+                            .semantics { contentDescription = c?.key ?: "Calendar color" },
+                    )
                 }
             }
         },

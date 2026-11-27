@@ -32,6 +32,10 @@ data class EventDetails(
     val exdate: String? = null,
     /** The series' DURATION, raw. */
     val duration: String? = null,
+    /** EVENT_COLOR_KEY: an entry of the account's palette, or null. */
+    val colorKey: String? = null,
+    /** EVENT_COLOR; null follows the calendar color. */
+    val color: Int? = null,
 ) {
     val recurring get() = rrule != null
 }
@@ -56,6 +60,9 @@ data class Draft(
     val reminders: List<Int> = listOf(10),
     val location: String = "",
     val description: String = "",
+    /** See [EventDetails.colorKey]; both null follow the calendar color. */
+    val colorKey: String? = null,
+    val color: Int? = null,
 ) {
     /** DTSTART. All-day events are stored as UTC midnights. */
     fun begin(): Instant =
@@ -109,6 +116,8 @@ data class Draft(
                 reminders = d.reminders,
                 location = d.location,
                 description = d.description,
+                colorKey = d.colorKey,
+                color = d.color,
             )
         }
     }

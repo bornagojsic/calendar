@@ -1,6 +1,8 @@
 package dev.bornagojsic.calendar
 
 import android.Manifest
+import androidx.compose.runtime.produceState
+import dev.bornagojsic.calendar.data.EventColor
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -286,7 +288,13 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
             )
         }
         vm.editor?.let {
-            EventEditor(it, calendars.orEmpty(), vm.writing, vm::update, onSave = { s -> vm.save(s, onError) }, onClose = vm::closeEditor)
+            val cal = calendars?.find { c -> c.id == it.draft.calendarId }
+            val palette by produceState(emptyList<EventColor>(), cal?.account, cal?.accountType) {
+                // Clear first: the old account's colors mustn't stay pickable while the new ones load.
+                value = emptyList()
+                value = cal?.let { c -> vm.palette(c) }.orEmpty()
+            }
+            EventEditor(it, calendars.orEmpty(), palette, vm.writing, vm::update, onSave = { s -> vm.save(s, onError) }, onClose = vm::closeEditor)
         }
     }
 }
