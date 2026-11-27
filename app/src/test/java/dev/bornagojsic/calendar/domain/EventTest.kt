@@ -2,6 +2,7 @@ package dev.bornagojsic.calendar.domain
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -54,8 +55,10 @@ class EventTest {
         assertEquals(listOf(Placed(e, 540, 540 + MIN_BLOCK_MINUTES, 0, 1)), layoutDay(listOf(e), day, zone))
     }
 
-    @Test fun weekStartFollowsLocale() {
-        assertEquals(LocalDate.of(2026, 11, 23), weekStart(day, Locale.UK)) // Monday
-        assertEquals(LocalDate.of(2026, 11, 22), weekStart(day, Locale.US)) // Sunday
+    @Test fun weekStartFollowsLocaleUnlessOverridden() {
+        assertEquals(LocalDate.of(2026, 11, 23), weekStart(day, Prefs().firstDayOfWeek(Locale.UK))) // Monday
+        assertEquals(LocalDate.of(2026, 11, 22), weekStart(day, Prefs().firstDayOfWeek(Locale.US))) // Sunday
+        assertEquals(LocalDate.of(2026, 11, 21), weekStart(day, Prefs(weekStart = DayOfWeek.SATURDAY).firstDayOfWeek(Locale.UK)))
+        assertEquals(day, weekStart(day, day.dayOfWeek))
     }
 }

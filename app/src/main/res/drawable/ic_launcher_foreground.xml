@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Calendar page on the 108dp adaptive canvas; artwork stays inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Header band in the accent color. -->
+    <path
+        android:fillColor="#346BF1"
+        android:pathData="M36,34h36a6,6 0,0 1,6 6v6h-48v-6a6,6 0,0 1,6 -6z" />
+    <!-- Page outline. -->
+    <path
+        android:strokeColor="#E8E8EA"
+        android:strokeWidth="3"
+        android:pathData="M36,34h36a6,6 0,0 1,6 6v34a6,6 0,0 1,-6 6h-36a6,6 0,0 1,-6 -6v-34a6,6 0,0 1,6 -6z" />
+    <!-- Binder rings. -->
+    <path
+        android:strokeColor="#E8E8EA"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M43,29v9M65,29v9" />
+    <!-- Today marker. -->
+    <path
+        android:fillColor="#346BF1"
+        android:pathData="M57,59h9a2,2 0,0 1,2 2v9a2,2 0,0 1,-2 2h-9a2,2 0,0 1,-2 -2v-9a2,2 0,0 1,2 -2z" />
+</vector>

@@ -1,5 +1,6 @@
 package dev.bornagojsic.calendar.domain
 
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -74,5 +75,10 @@ fun layoutDay(events: List<Event>, day: LocalDate, zone: ZoneId): List<Placed> {
     return result
 }
 
-fun weekStart(date: LocalDate, locale: Locale = Locale.getDefault()): LocalDate =
-    date.with(TemporalAdjusters.previousOrSame(WeekFields.of(locale).firstDayOfWeek))
+/** [first] is the week's first day: the user's setting, or the locale's (see `Prefs`). */
+fun weekStart(date: LocalDate, first: DayOfWeek): LocalDate = date.with(TemporalAdjusters.previousOrSame(first))
+
+/** User overrides from Settings; null follows the phone's locale. */
+data class Prefs(val weekStart: DayOfWeek? = null, val clock24: Boolean? = null) {
+    fun firstDayOfWeek(locale: Locale = Locale.getDefault()): DayOfWeek = weekStart ?: WeekFields.of(locale).firstDayOfWeek
+}

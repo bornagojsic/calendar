@@ -19,6 +19,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -26,6 +28,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.ColorUtils
 import dev.bornagojsic.calendar.domain.Event
+import dev.bornagojsic.calendar.domain.Prefs
+import java.time.DayOfWeek
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 import java.time.LocalDate
@@ -46,7 +50,18 @@ fun eventColor(argb: Int): Color {
 
 val Event.label get() = title.ifBlank { "(No title)" }
 
-/** Follows the phone's 12h/24h setting. */
+/** The user's Settings, provided once at the root. */
+val LocalPrefs = staticCompositionLocalOf { Prefs() }
+
+/** The week's first day: the Settings override, else the phone locale's. */
+@Composable
+fun firstDayOfWeek(): DayOfWeek = LocalPrefs.current.firstDayOfWeek(LocalConfiguration.current.locales[0])
+
+/** The Settings override, else the phone's 12h/24h setting. */
+@Composable
+fun is24Hour(): Boolean = LocalPrefs.current.clock24 ?: DateFormat.is24HourFormat(LocalContext.current)
+
+/** Follows [is24Hour]. */
 @Composable
 fun rememberTimeFormat(): DateTimeFormatter = rememberClockFormat("HH:mm", "h:mm a")
 
@@ -56,8 +71,8 @@ fun rememberHourFormat(): DateTimeFormatter = rememberClockFormat("HH:mm", "h a"
 
 @Composable
 private fun rememberClockFormat(pattern24: String, pattern12: String): DateTimeFormatter {
-    val context = LocalContext.current
-    return remember { DateTimeFormatter.ofPattern(if (DateFormat.is24HourFormat(context)) pattern24 else pattern12) }
+    val h24 = is24Hour()
+    return remember(h24) { DateTimeFormatter.ofPattern(if (h24) pattern24 else pattern12) }
 }
 
 @Composable

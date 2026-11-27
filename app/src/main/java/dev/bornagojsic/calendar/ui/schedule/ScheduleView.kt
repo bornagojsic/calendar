@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -114,21 +115,48 @@ fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader
         }
     }
 
-    val monthFormat = remember { DateTimeFormatter.ofPattern("LLLL yyyy") }
     // A screen of bottom padding, so even the last row (today, a picked date) can sit at the top.
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = maxHeight)) {
-            itemsIndexed(days, key = { _, (d, _) -> d.toEpochDay() }) { i, (day, dayEvents) ->
-                Column {
-                    if (i == 0 || days[i - 1].first.month != day.month || days[i - 1].first.year != day.year) {
-                        Text(
-                            day.format(monthFormat),
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
-                        )
-                    }
-                    DayRow(day, day == today, dayEvents, zone, onEvent)
+        DayList(days, zone, onEvent, list, PaddingValues(bottom = maxHeight))
+    }
+}
+
+/** Search results, listed like the Schedule: by day, under month headers. */
+@Composable
+fun SearchResults(events: List<Event>, onEvent: (Event) -> Unit) {
+    val zone = ZoneId.systemDefault()
+    val days = remember(events) {
+        if (events.isEmpty()) emptyList()
+        else groupByDay(events, zone, events.minOf { it.days(zone).start }, events.maxOf { it.days(zone).endInclusive }, emptyList())
+    }
+    if (days.isEmpty()) {
+        Text("No results", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+    } else {
+        DayList(days, zone, onEvent, rememberLazyListState(), PaddingValues())
+    }
+}
+
+@Composable
+private fun DayList(
+    days: List<Pair<LocalDate, List<Event>>>,
+    zone: ZoneId,
+    onEvent: (Event) -> Unit,
+    list: LazyListState,
+    padding: PaddingValues,
+) {
+    val today = LocalDate.now()
+    val monthFormat = remember { DateTimeFormatter.ofPattern("LLLL yyyy") }
+    LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = padding) {
+        itemsIndexed(days, key = { _, (d, _) -> d.toEpochDay() }) { i, (day, dayEvents) ->
+            Column {
+                if (i == 0 || days[i - 1].first.month != day.month || days[i - 1].first.year != day.year) {
+                    Text(
+                        day.format(monthFormat),
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
+                    )
                 }
+                DayRow(day, day == today, dayEvents, zone, onEvent)
             }
         }
     }

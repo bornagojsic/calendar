@@ -7,6 +7,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +32,7 @@ fun CalendarDrawer(
     onMode: (ViewMode) -> Unit,
     calendars: List<CalendarInfo>?,
     onToggle: (CalendarInfo) -> Unit,
+    onSettings: () -> Unit,
 ) {
     ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
         // One list for everything, so the calendars stay reachable when the drawer is short (landscape).
@@ -71,6 +75,16 @@ fun CalendarDrawer(
                     }
                     items(list, key = { it.id }) { cal -> CalendarRow(cal, onToggle) }
                 }
+            }
+            item {
+                HorizontalDivider(Modifier.padding(top = 8.dp))
+                NavigationDrawerItem(
+                    label = { Text("Settings") },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                    selected = false,
+                    onClick = onSettings,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
             }
         }
     }

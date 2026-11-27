@@ -13,10 +13,14 @@ import androidx.compose.runtime.setValue
 import dev.bornagojsic.calendar.data.Scope
 import dev.bornagojsic.calendar.domain.Draft
 import dev.bornagojsic.calendar.domain.Event
+import dev.bornagojsic.calendar.domain.Prefs
 import dev.bornagojsic.calendar.domain.Source
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +29,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -41,6 +46,11 @@ enum class ViewMode(val label: String, val days: Int) {
 }
 
 private val VIEW_MODE = stringPreferencesKey("view_mode")
+private val WEEK_START = stringPreferencesKey("week_start")
+private val CLOCK = stringPreferencesKey("clock")
+
+/** How far around today search looks; Instances expands every recurrence in the range, so keep it bounded. */
+private const val SEARCH_YEARS = 2L
 
 /** The open editor: a draft, and the occurrence it edits (null for a new event). */
 data class Editor(val draft: Draft, val source: Source?)
@@ -55,6 +65,52 @@ class CalendarViewModel(
     /** Last used view, Schedule on first launch. null while DataStore loads, so the UI doesn't flash the default. */
     val mode = settings.data
         .map { p -> ViewMode.entries.find { it.name == p[VIEW_MODE] } ?: ViewMode.SCHEDULE }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Week start and 12h/24h overrides; defaults (locale) until DataStore loads. */
+    val prefs = settings.data
+        .map { p ->
+            Prefs(
+                weekStart = DayOfWeek.entries.find { it.name == p[WEEK_START] },
+                clock24 = p[CLOCK]?.let { it == "24" },
+            )
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Prefs())
+
+    fun setPrefs(prefs: Prefs) {
+        viewModelScope.launch {
+            settings.edit { p ->
+                prefs.weekStart?.let { p[WEEK_START] = it.name } ?: p.remove(WEEK_START)
+                prefs.clock24?.let { p[CLOCK] = if (it) "24" else "12" } ?: p.remove(CLOCK)
+            }
+        }
+    }
+
+    private val _query = MutableStateFlow<String?>(null)
+
+    /** The search text; null while search is closed. */
+    val query = _query.asStateFlow()
+
+    fun search(query: String?) {
+        _query.value = query
+    }
+
+    /** Matches for [query], or null while there's nothing to show (closed, blank, or the first query runs). */
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
+    val results = _query
+        .map { it?.trim().orEmpty() }
+        .distinctUntilChanged()
+        .debounce(250)
+        .flatMapLatest { q ->
+            if (q.isEmpty()) return@flatMapLatest flowOf(null)
+            val today = LocalDate.now()
+            val zone = ZoneId.systemDefault()
+            repo.search(
+                q,
+                today.minusYears(SEARCH_YEARS).atStartOfDay(zone).toInstant(),
+                today.plusYears(SEARCH_YEARS).atStartOfDay(zone).toInstant(),
+            )
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val _date = MutableStateFlow(LocalDate.now())
