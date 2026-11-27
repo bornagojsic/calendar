@@ -201,7 +201,13 @@ fun EventEditor(
         }
         Dialog.CUSTOM -> RecurrenceDialog(
             initial = rule ?: Rule(Freq.WEEKLY, days = setOf(d.start.dayOfWeek)),
-            onDone = { onChange(d.copy(rrule = it.format(d.zone, d.allDay))) },
+            onDone = { new ->
+                val until = Regex("UNTIL=[^;]*")
+                val old = d.rrule?.let { until.find(it)?.value }
+                // An unchanged end keeps its exact UNTIL; the editor only models the date.
+                val r = new.format(d.zone, d.allDay).let { if (old != null && new.until == rule?.until) it.replace(until, old) else it }
+                if (new != rule) onChange(d.copy(rrule = r))
+            },
             onDismiss = ::dismiss,
         )
         Dialog.CALENDAR -> ChoiceDialog(writable, calendar, { it.name }, { onChange(d.copy(calendarId = it.id)) }, ::dismiss)
