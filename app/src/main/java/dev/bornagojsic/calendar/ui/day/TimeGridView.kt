@@ -49,11 +49,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.bornagojsic.calendar.domain.Event
+import dev.bornagojsic.calendar.domain.layoutBars
 import dev.bornagojsic.calendar.domain.layoutDay
 import dev.bornagojsic.calendar.domain.weekStart
 import dev.bornagojsic.calendar.ui.firstDayOfWeek
 import dev.bornagojsic.calendar.ui.DatePager
 import dev.bornagojsic.calendar.ui.EventChip
+import dev.bornagojsic.calendar.ui.chipPitch
 import dev.bornagojsic.calendar.ui.EventLoader
 import dev.bornagojsic.calendar.ui.eventColor
 import dev.bornagojsic.calendar.ui.label
@@ -144,19 +146,26 @@ private fun TimeGridPage(
     onSlot: (LocalDateTime) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
+    val pitch = chipPitch()
     val today = LocalDate.now()
     val border = MaterialTheme.colorScheme.outlineVariant
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.padding(start = GUTTER)) {
-            days.forEach { day ->
-                Column(Modifier.weight(1f).padding(horizontal = 1.dp, vertical = 4.dp)) {
-                    DayLabel(day, day == today)
-                    // Capped so a pile of all-day events can't squeeze out the time grid.
-                    Column(Modifier.heightIn(max = 96.dp).verticalScroll(rememberScrollState())) {
-                        events.filter { it.allDay && day in it.days(zone) }.forEach {
-                            EventChip(it, Modifier.padding(top = 2.dp).clickable { onEvent(it) })
-                        }
-                    }
+        Column(Modifier.padding(start = GUTTER, top = 4.dp, bottom = 4.dp)) {
+            Row { days.forEach { day -> Box(Modifier.weight(1f)) { DayLabel(day, day == today) } } }
+            val bars = remember(events, days, zone) { layoutBars(events.filter { it.isBar }, days, zone) }
+            // Capped so a pile of all-day events can't squeeze out the time grid.
+            BoxWithConstraints(Modifier.fillMaxWidth().heightIn(max = 96.dp).verticalScroll(rememberScrollState())) {
+                val width = maxWidth / days.size
+                Box(Modifier.height(pitch * (bars.maxOfOrNull { it.slot + 1 } ?: 0)))
+                bars.forEach { b ->
+                    EventChip(
+                        b.event,
+                        Modifier
+                            .offset(x = width * b.startCol, y = pitch * b.slot + 2.dp)
+                            .width(width * (b.endCol - b.startCol + 1))
+                            .padding(horizontal = 1.dp)
+                            .clickable { onEvent(b.event) },
+                    )
                 }
             }
         }
