@@ -14,6 +14,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import dev.bornagojsic.calendar.ui.LocalPrefs
+import dev.bornagojsic.calendar.domain.Prefs
 import dev.bornagojsic.calendar.ui.schedule.SearchResults
 import dev.bornagojsic.calendar.ui.settings.SettingsScreen
 import android.content.Context
@@ -212,7 +213,7 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
     BackHandler(enabled = query != null) { vm.search(null) }
 
     // Settings reach every view, sheet and dialog below.
-    CompositionLocalProvider(LocalPrefs provides prefs) {
+    CompositionLocalProvider(LocalPrefs provides (prefs ?: Prefs())) {
         ModalNavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
@@ -259,8 +260,8 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
             ) { padding ->
                 Box(Modifier.fillMaxSize().padding(padding)) {
                     // key: each view keeps its own pager/list state; switching views (or the week start) starts fresh at `date`.
-                    if (query != null) results?.let { SearchResults(it, vm::select) } else key(mode, prefs.weekStart) {
-                        when (val m = mode) {
+                    if (query != null) results?.let { SearchResults(it, vm::select) } else key(mode, prefs?.weekStart) {
+                        when (val m = mode.takeIf { prefs != null }) {
                             null -> Unit
                             ViewMode.SCHEDULE -> ScheduleView(date, vm::setDate, vm::events, vm::select)
                             ViewMode.MONTH -> MonthView(date, vm::setDate, onDay = {
@@ -273,7 +274,7 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
                 }
             }
         }
-        if (settingsOpen) SettingsScreen(prefs, vm::setPrefs, onClose = { settingsOpen = false })
+        if (settingsOpen) prefs?.let { SettingsScreen(it, vm::setPrefs, onClose = { settingsOpen = false }) }
         if (picking) DateDialog(date, onPick = { vm.setDate(it) }, onDismiss = { picking = false })
         selected?.let { event ->
             EventSheet(

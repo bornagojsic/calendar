@@ -67,7 +67,7 @@ class CalendarViewModel(
         .map { p -> ViewMode.entries.find { it.name == p[VIEW_MODE] } ?: ViewMode.SCHEDULE }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    /** Week start and 12h/24h overrides; defaults (locale) until DataStore loads. */
+    /** Week start and 12h/24h overrides. null while DataStore loads, so views don't open on the locale's week first. */
     val prefs = settings.data
         .map { p ->
             Prefs(
@@ -75,7 +75,7 @@ class CalendarViewModel(
                 clock24 = p[CLOCK]?.let { it == "24" },
             )
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Prefs())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun setPrefs(prefs: Prefs) {
         viewModelScope.launch {
