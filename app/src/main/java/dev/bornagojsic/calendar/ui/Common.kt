@@ -25,7 +25,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.graphics.ColorUtils
 import dev.bornagojsic.calendar.domain.Event
 import dev.bornagojsic.calendar.domain.Prefs
@@ -74,6 +77,10 @@ private fun rememberClockFormat(pattern24: String, pattern12: String): DateTimeF
     val h24 = is24Hour()
     return remember(h24) { DateTimeFormatter.ofPattern(if (h24) pattern24 else pattern12) }
 }
+
+/** Vertical step between stacked chips, in sp so it grows with the chip text under large font scales. */
+@Composable
+fun chipPitch(): Dp = with(LocalDensity.current) { 20.sp.toDp() }
 
 @Composable
 fun EventChip(event: Event, modifier: Modifier = Modifier) {

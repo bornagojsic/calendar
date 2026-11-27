@@ -33,6 +33,7 @@ import dev.bornagojsic.calendar.domain.weekStart
 import dev.bornagojsic.calendar.ui.firstDayOfWeek
 import dev.bornagojsic.calendar.ui.DatePager
 import dev.bornagojsic.calendar.ui.EventChip
+import dev.bornagojsic.calendar.ui.chipPitch
 import dev.bornagojsic.calendar.ui.EventLoader
 import java.time.LocalDate
 import java.time.YearMonth
@@ -42,7 +43,6 @@ import java.time.temporal.ChronoUnit
 import androidx.compose.ui.platform.LocalConfiguration
 
 private val BASE = YearMonth.of(2000, 1)
-private val CHIP_HEIGHT = 20.dp // chip plus gap
 private val DAY_NUMBER_HEIGHT = 26.dp
 
 /** 6x7 month grid. Tapping a day calls [onDay]. */
@@ -64,6 +64,7 @@ fun MonthView(date: LocalDate, onDate: (LocalDate) -> Unit, onDay: (LocalDate) -
 @Composable
 private fun MonthPage(month: YearMonth, first: LocalDate, events: List<Event>, onDay: (LocalDate) -> Unit) {
     val zone = ZoneId.systemDefault()
+    val pitch = chipPitch()
     val today = LocalDate.now()
     val border = MaterialTheme.colorScheme.outlineVariant
     Column(Modifier.fillMaxSize()) {
@@ -83,7 +84,7 @@ private fun MonthPage(month: YearMonth, first: LocalDate, events: List<Event>, o
             val bars = remember(events, first) { layoutBars(events, days, zone) }
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                 val width = maxWidth / 7
-                val fits = ((maxHeight - DAY_NUMBER_HEIGHT) / CHIP_HEIGHT).toInt().coerceAtLeast(0)
+                val fits = ((maxHeight - DAY_NUMBER_HEIGHT) / pitch).toInt().coerceAtLeast(0)
                 // Keep the last slot for "+k" when not everything fits.
                 val shown = if (bars.all { it.slot < fits }) fits else (fits - 1).coerceAtLeast(0)
                 Row(Modifier.fillMaxSize()) {
@@ -104,7 +105,7 @@ private fun MonthPage(month: YearMonth, first: LocalDate, events: List<Event>, o
                     EventChip(
                         b.event,
                         Modifier
-                            .offset(x = width * b.startCol, y = DAY_NUMBER_HEIGHT + CHIP_HEIGHT * b.slot)
+                            .offset(x = width * b.startCol, y = DAY_NUMBER_HEIGHT + pitch * b.slot)
                             .width(width * (b.endCol - b.startCol + 1))
                             .padding(horizontal = 2.dp),
                     )
@@ -116,7 +117,7 @@ private fun MonthPage(month: YearMonth, first: LocalDate, events: List<Event>, o
                             "+$hidden",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.offset(x = width * c, y = DAY_NUMBER_HEIGHT + CHIP_HEIGHT * shown).padding(start = 6.dp),
+                            modifier = Modifier.offset(x = width * c, y = DAY_NUMBER_HEIGHT + pitch * shown).padding(start = 6.dp),
                         )
                     }
                 }

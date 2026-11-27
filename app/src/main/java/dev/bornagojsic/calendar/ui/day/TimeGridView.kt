@@ -55,6 +55,7 @@ import dev.bornagojsic.calendar.domain.weekStart
 import dev.bornagojsic.calendar.ui.firstDayOfWeek
 import dev.bornagojsic.calendar.ui.DatePager
 import dev.bornagojsic.calendar.ui.EventChip
+import dev.bornagojsic.calendar.ui.chipPitch
 import dev.bornagojsic.calendar.ui.EventLoader
 import dev.bornagojsic.calendar.ui.eventColor
 import dev.bornagojsic.calendar.ui.label
@@ -70,7 +71,6 @@ import java.time.temporal.ChronoUnit
 import androidx.compose.ui.platform.LocalConfiguration
 
 private val GUTTER = 48.dp
-private val BAR_PITCH = 20.dp
 
 /** Day, 3-day and Week views: an all-day strip over a 24h grid, [days] columns per page. */
 @Composable
@@ -146,6 +146,7 @@ private fun TimeGridPage(
     onSlot: (LocalDateTime) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
+    val pitch = chipPitch()
     val today = LocalDate.now()
     val border = MaterialTheme.colorScheme.outlineVariant
     Column(Modifier.fillMaxSize()) {
@@ -155,12 +156,12 @@ private fun TimeGridPage(
             // Capped so a pile of all-day events can't squeeze out the time grid.
             BoxWithConstraints(Modifier.fillMaxWidth().heightIn(max = 96.dp).verticalScroll(rememberScrollState())) {
                 val width = maxWidth / days.size
-                Box(Modifier.height(BAR_PITCH * (bars.maxOfOrNull { it.slot + 1 } ?: 0)))
+                Box(Modifier.height(pitch * (bars.maxOfOrNull { it.slot + 1 } ?: 0)))
                 bars.forEach { b ->
                     EventChip(
                         b.event,
                         Modifier
-                            .offset(x = width * b.startCol, y = BAR_PITCH * b.slot + 2.dp)
+                            .offset(x = width * b.startCol, y = pitch * b.slot + 2.dp)
                             .width(width * (b.endCol - b.startCol + 1))
                             .padding(horizontal = 1.dp)
                             .clickable { onEvent(b.event) },
