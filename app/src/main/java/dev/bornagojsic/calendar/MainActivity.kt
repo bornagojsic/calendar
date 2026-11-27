@@ -58,6 +58,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -255,6 +258,14 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
                         actions = {
                             IconButton(onClick = { vm.search("") }) { Icon(Icons.Default.Search, contentDescription = "Search") }
                             TodayButton(onClick = { vm.setDate(LocalDate.now()) })
+                            var overflow by remember { mutableStateOf(false) }
+                            IconButton(onClick = { overflow = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
+                            DropdownMenu(overflow, onDismissRequest = { overflow = false }) {
+                                DropdownMenuItem(text = { Text("Refresh") }, onClick = {
+                                    overflow = false
+                                    vm.refresh()
+                                })
+                            }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     )

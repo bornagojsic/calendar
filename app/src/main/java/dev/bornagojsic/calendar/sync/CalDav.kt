@@ -5,6 +5,7 @@ import android.content.ContentProviderClient
 import android.content.ContentProviderOperation
 import android.content.ContentUris
 import android.content.ContentValues
+import android.content.OperationApplicationException
 import android.net.Uri
 import android.provider.CalendarContract
 import android.provider.CalendarContract.Calendars
@@ -101,6 +102,9 @@ suspend fun remoteCalendars(client: HttpClient, home: Url): List<RemoteCalendar>
         }
         .toList()
 
+/** DIRTY value for rows being uploaded; app writes set DIRTY to 1. */
+private const val UPLOADING = 2
+
 /** Accent blue, for calendars the server gives no color. */
 private const val DEFAULT_COLOR = 0xFF346BF1.toInt()
 
@@ -194,13 +198,19 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
     private suspend fun push(calendarId: Long, url: Url): Boolean {
         val series = provider.query(
             eventsUri, arrayOf(Events._ID, Events.ORIGINAL_ID),
-            "${Events.CALENDAR_ID} = ? AND (${Events.DIRTY} = 1 OR ${Events.DELETED} = 1)", arrayOf("$calendarId"), null,
+            "${Events.CALENDAR_ID} = ? AND (${Events.DIRTY} != 0 OR ${Events.DELETED} = 1)", arrayOf("$calendarId"), null,
         )?.use { c -> buildSet { while (c.moveToNext()) add(if (c.isNull(1)) c.getLong(0) else c.getLong(1)) } }.orEmpty()
         series.forEach { pushSeries(calendarId, url, it) }
         return series.isNotEmpty()
     }
 
     private suspend fun pushSeries(calendarId: Long, url: Url, id: Long) {
+        // Mark the series as uploading before reading it. An app edit during the upload sets DIRTY back to 1, which the
+        // guarded clear below leaves alone, so the edit goes up on the next sync.
+        provider.update(
+            eventsUri, ContentValues().apply { put(Events.DIRTY, UPLOADING) },
+            "(${Events._ID} = ? OR ${Events.ORIGINAL_ID} = ?) AND ${Events.DIRTY} = 1", arrayOf("$id", "$id"),
+        )
         val master = rows("${Events._ID} = ?", id).firstOrNull() ?: return
         val name = master.string(Events._SYNC_ID)
         val etag = master.string(Events.SYNC_DATA1)
@@ -237,15 +247,18 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
                 .withValue(Events.UID_2445, uid)
                 .withValue(Events.SYNC_DATA1, newEtag)
                 .withValue(Events.SYNC_DATA2, ics)
-                .withValue(Events.DIRTY, 0)
                 .build(),
         )
         live.forEach {
             ops += ContentProviderOperation.newUpdate(ContentUris.withAppendedId(eventsUri, it.long(Events._ID)!!))
                 .withValue(Events.ORIGINAL_SYNC_ID, file)
-                .withValue(Events.DIRTY, 0)
                 .build()
         }
+        // Only rows still marked UPLOADING are clean. The provider rejects a selection on an id URI, hence _ID in it.
+        ops += ContentProviderOperation.newUpdate(eventsUri)
+            .withValue(Events.DIRTY, 0)
+            .withSelection("(${Events._ID} = ? OR ${Events.ORIGINAL_ID} = ?) AND ${Events.DIRTY} = $UPLOADING", arrayOf("$id", "$id"))
+            .build()
         provider.applyBatch(ops)
     }
 
@@ -258,7 +271,7 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
             null
         }
         // store() overwrites the master in place (clearing DIRTY) and replaces its exceptions.
-        if (got == null) deleteSeries(id) else store(calendarId, file, got.first, got.second)
+        if (got == null) deleteSeries(id) else store(calendarId, file, got.first, got.second, force = true)
     }
 
     /** Provider rows matching [selection] (with [id] as its argument), with their alert reminders. */
@@ -272,8 +285,11 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
         "${Reminders.EVENT_ID} = ? AND ${Reminders.METHOD} IN (${Reminders.METHOD_DEFAULT}, ${Reminders.METHOD_ALERT})", arrayOf("$eventId"), null,
     )?.use { c -> buildList { while (c.moveToNext()) add(c.getInt(0)) } }.orEmpty().distinct().sorted()
 
-    /** Replaces the local copy of resource [name] with [ics]; the master row is updated in place to keep its id. */
-    private fun store(calendarId: Long, name: String, etag: String?, ics: String) {
+    /**
+     * Replaces the local copy of resource [name] with [ics]; the master row is updated in place to keep its id. Unless
+     * [force], a series with local changes is left alone: the next push uploads them, or gets a 412 and forces this.
+     */
+    private fun store(calendarId: Long, name: String, etag: String?, ics: String, force: Boolean = false) {
         // shortcut: resources ical4j can't parse are skipped, so one bad event doesn't stop the sync. Log them if it matters.
         val rows = runCatching { parseEvents(ics) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return
         val existing = provider.query(
@@ -293,6 +309,10 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
         }
         val masterRef: (ContentProviderOperation.Builder, String) -> ContentProviderOperation.Builder
         if (existing != null) {
+            if (!force) ops += ContentProviderOperation.newAssertQuery(eventsUri)
+                .withSelection("(${Events._ID} = ? OR ${Events.ORIGINAL_ID} = ?) AND ${Events.DIRTY} != 0", arrayOf("$existing", "$existing"))
+                .withExpectedCount(0)
+                .build()
             // The provider unboxes STATUS on update and throws on null (seen on API 36).
             if (master[Events.STATUS] == null) values.remove(Events.STATUS)
             ops += ContentProviderOperation.newUpdate(ContentUris.withAppendedId(eventsUri, existing)).withValues(values).build()
@@ -312,7 +332,12 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
                 .build()
             reminders(row) { it.withValueBackReference(Reminders.EVENT_ID, at) }
         }
-        provider.applyBatch(ops)
+        try {
+            provider.applyBatch(ops)
+        } catch (e: OperationApplicationException) {
+            // The assert failed: edited locally since the push, so keep the edit.
+            if (existing == null || force) throw e
+        }
     }
 
     /** Removes a series' rows for good (sync adapter deletes skip the DELETED flag). */
