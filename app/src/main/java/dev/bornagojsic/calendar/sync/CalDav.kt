@@ -97,12 +97,14 @@ suspend fun findHome(client: HttpClient, base: Url): Url {
     throw IOException("No CalDAV server found at $base")
 }
 
-/** Calendars in [home] that hold events. */
-suspend fun remoteCalendars(client: HttpClient, home: Url): List<RemoteCalendar> =
-    DavResource(client, home).propfind(
+/** Calendars in [home] that hold events, and whether the listing is complete (no failed or truncated responses). */
+suspend fun remoteCalendars(client: HttpClient, home: Url): Pair<List<RemoteCalendar>, Boolean> {
+    var complete = true
+    val calendars = DavResource(client, home).propfind(
         1, WebDAV.ResourceType, WebDAV.DisplayName, CalDAV.CalendarColor, CalDAV.SupportedCalendarComponentSet, WebDAV.CurrentUserPrivilegeSet,
     ).responses()
         .filter { r ->
+            if (!r.isSuccess() || !r.error.isNullOrEmpty()) complete = false
             sameOrigin(r.href, home) &&
                 r[ResourceType::class.java]?.types?.contains(CalDAV.Calendar) == true &&
                     // No component set means the calendar takes every kind.
@@ -117,6 +119,8 @@ suspend fun remoteCalendars(client: HttpClient, home: Url): List<RemoteCalendar>
             )
         }
         .toList()
+    return calendars to complete
+}
 
 /** DIRTY value for rows being uploaded; app writes set DIRTY to 1. */
 private const val UPLOADING = 2
@@ -150,13 +154,13 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
     private val attendeesUri = Attendees.CONTENT_URI.asSyncAdapter()
 
     suspend fun run(home: Url) {
-        val remote = remoteCalendars(client, home)
+        val (remote, complete) = remoteCalendars(client, home)
         val local = provider.query(
             calendarsUri, arrayOf(Calendars._ID, Calendars._SYNC_ID, Calendars.CAL_SYNC1),
             "${Calendars.ACCOUNT_NAME} = ? AND ${Calendars.ACCOUNT_TYPE} = ?", arrayOf(account.name, account.type), null,
         )?.use { c -> buildMap { while (c.moveToNext()) put(c.getString(1), c.getLong(0) to c.getString(2)) } }.orEmpty()
-        // Calendars deleted on the server go, with their events.
-        local.filterKeys { url -> remote.none { it.url.toString() == url } }
+        // Calendars deleted on the server go, with their events, unless the listing may have left some out.
+        if (complete) local.filterKeys { url -> remote.none { it.url.toString() == url } }
             .forEach { (_, v) -> provider.delete(ContentUris.withAppendedId(calendarsUri, v.first), null, null) }
         for (cal in remote) {
             val values = ContentValues().apply {
@@ -192,15 +196,18 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
         if (!pushed && newCtag != null && newCtag == ctag) return
 
         val remote = HashMap<String, String?>()
+        // A failed or truncated listing (e.g. 507 on the collection) may leave out live events, so it deletes nothing.
+        var complete = true
         dav.calendarQuery("VEVENT", null, null).responses().collect { r ->
-            if (r.isSuccess() && r.href != url) remote[r.hrefName()] = r[GetETag::class.java]?.eTag
+            if (!r.isSuccess() || !r.error.isNullOrEmpty()) complete = false
+            else if (r.href != url) remote[r.hrefName()] = r[GetETag::class.java]?.eTag
         }
         val local = provider.query(
             eventsUri, arrayOf(Events._ID, Events._SYNC_ID, Events.SYNC_DATA1),
             "${Events.CALENDAR_ID} = ? AND ${Events.ORIGINAL_ID} IS NULL AND ${Events._SYNC_ID} IS NOT NULL", arrayOf("$calendarId"), null,
         )?.use { c -> buildMap { while (c.moveToNext()) put(c.getString(1), c.getLong(0) to c.getString(2)) } }.orEmpty()
-        local.filterKeys { it !in remote }.values.forEach { deleteSeries(it.first) }
-        // Names not downloaded yet; any left over keep the old ctag, so the next sync fetches them again.
+        if (complete) local.filterKeys { it !in remote }.values.forEach { deleteSeries(it.first) }
+        // Names not downloaded yet; any left over, or an incomplete listing, keep the old ctag, so the next sync fetches them again.
         val missing = remote.filter { (name, etag) -> etag == null || local[name]?.second != etag }.keys.toMutableSet()
         missing.toList().chunked(50).forEach { names ->
             dav.multiget(names.map { member(url, it) }).responses().collect { r ->
@@ -211,7 +218,7 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
                 }
             }
         }
-        if (missing.isEmpty()) provider.update(
+        if (complete && missing.isEmpty()) provider.update(
             ContentUris.withAppendedId(calendarsUri, calendarId), ContentValues().apply { put(Calendars.CAL_SYNC1, newCtag) }, null, null,
         )
     }
