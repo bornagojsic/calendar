@@ -63,6 +63,8 @@ class RecurrenceTest {
         )
         // A week of wall-clock time across the 29 Mar DST change: 09:00 CET (08:00Z) to 09:00 CEST (07:00Z).
         assertEquals("20260330T070000Z", shiftExdate("20260323T080000Z", java.time.Duration.ofDays(7), zone))
+        // Zone change only: 09:00 in Zagreb (08:00Z) becomes 09:00 in New York (14:00Z).
+        assertEquals("20261215T140000Z", shiftExdate("20261215T080000Z", java.time.Duration.ZERO, zone, ZoneId.of("America/New_York")))
         assertEquals("20261222T170000Z", exdate(Instant.parse("2026-12-22T17:00:00Z"), allDay = false))
     }
 

@@ -188,7 +188,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
         } ?: return null
         // An exception row has no RRULE of its own: the series rule and start live on its master.
         val series = if (details.seriesId == id) details else resolver.query(
-            eventUri(details.seriesId), arrayOf(Events.RRULE, Events.DTSTART, Events._SYNC_ID, Events.EXDATE, Events.DURATION), null, null, null,
+            eventUri(details.seriesId), arrayOf(Events.RRULE, Events.DTSTART, Events._SYNC_ID, Events.EXDATE, Events.DURATION, Events.RDATE), null, null, null,
         )?.use { c ->
             if (c.moveToFirst()) details.copy(
                 rrule = c.getString(0),
@@ -196,6 +196,8 @@ class CalendarRepository(private val resolver: ContentResolver) {
                 synced = !c.isNull(2),
                 exdate = c.getString(3),
                 duration = c.getString(4),
+                // An exception has no RDATE of its own; a master with one makes the whole set read-only.
+                writable = details.writable && c.isNull(5),
             ) else null
         } ?: details
         val reminders = resolver.query(
@@ -249,7 +251,8 @@ class CalendarRepository(private val resolver: ContentResolver) {
                 val wallShift = Duration.between(LocalDateTime.ofInstant(src.originalTime, zone), draft.start)
                 val moved = LocalDateTime.ofInstant(d.seriesStart, zone) + wallShift
                 val begin = if (draft.allDay) moved.toLocalDate().atStartOfDay(ZoneOffset.UTC).toInstant() else moved.atZone(draft.zone).toInstant()
-                update(ops, d.seriesId, draft, begin = begin, exdate = d.exdate?.let { shiftExdate(it, wallShift, zone) })
+                val newZone = if (draft.allDay) ZoneOffset.UTC else draft.zone
+                update(ops, d.seriesId, draft, begin = begin, exdate = d.exdate?.let { shiftExdate(it, wallShift, zone, newZone) })
             }
             else -> {
                 val at = src.originalTime
@@ -263,7 +266,8 @@ class CalendarRepository(private val resolver: ContentResolver) {
                 // Occurrences deleted after the split stay deleted, moved by however far this one moved.
                 val zone = if (d.allDay) ZoneOffset.UTC else d.zone
                 val wallShift = Duration.between(LocalDateTime.ofInstant(at, zone), draft.start)
-                val exdate = exdatesFrom(d.exdate, at, d.allDay)?.let { shiftExdate(it, wallShift, zone) }
+                val newZone = if (draft.allDay) ZoneOffset.UTC else draft.zone
+                val exdate = exdatesFrom(d.exdate, at, d.allDay)?.let { shiftExdate(it, wallShift, zone, newZone) }
                 insert(ops, draft.copy(rrule = rrule), exdate = if (rrule != null) exdate else null)
             }
         }
