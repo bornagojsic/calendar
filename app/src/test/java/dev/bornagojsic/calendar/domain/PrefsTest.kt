@@ -10,19 +10,21 @@ class PrefsTest {
 
     @Test
     fun allDaySwitchSwapsUntouchedDefaults() {
-        val allDay = prefs.followDefaults(timed, timed.reshape(allDay = true))
+        val allDay = prefs.followDefaults(timed, timed.reshape(allDay = true), edited = false)
         assertEquals(listOf(1_440), allDay.reminders)
-        assertEquals(listOf(10), prefs.followDefaults(allDay, allDay.reshape(allDay = false)).reminders)
+        assertEquals(listOf(10), prefs.followDefaults(allDay, allDay.reshape(allDay = false), edited = false).reminders)
     }
 
     @Test
     fun allDaySwitchKeepsEditedReminders() {
-        val edited = timed.copy(reminders = listOf(5))
-        assertEquals(listOf(5), prefs.followDefaults(edited, edited.reshape(allDay = true)).reminders)
+        // Edited to equal the all-day defaults: switching back must still keep them.
+        val edited = timed.copy(reminders = listOf(1_440))
+        val allDay = prefs.followDefaults(edited, edited.reshape(allDay = true), edited = true)
+        assertEquals(listOf(1_440), prefs.followDefaults(allDay, allDay.reshape(allDay = false), edited = true).reminders)
     }
 
     @Test
     fun otherEditsKeepReminders() {
-        assertEquals(listOf(10), prefs.followDefaults(timed, timed.copy(title = "x")).reminders)
+        assertEquals(listOf(10), prefs.followDefaults(timed, timed.copy(title = "x"), edited = false).reminders)
     }
 }

@@ -68,7 +68,8 @@ private fun Preferences.reminders(key: Preferences.Key<String>) = this[key]?.spl
 const val SEARCH_YEARS = 2L
 
 /** The open editor: a draft, and the occurrence it edits (null for a new event). */
-data class Editor(val draft: Draft, val source: Source?)
+/** [remindersEdited]: the user changed the reminders, so an all-day switch keeps them instead of swapping defaults. */
+data class Editor(val draft: Draft, val source: Source?, val remindersEdited: Boolean = false)
 
 class CalendarViewModel(
     private val repo: CalendarRepository,
@@ -244,7 +245,11 @@ class CalendarViewModel(
     fun update(draft: Draft) {
         if (writing) return
         val e = editor ?: return
-        editor = e.copy(draft = if (e.source == null) (prefs.value ?: Prefs()).followDefaults(e.draft, draft) else draft)
+        val edited = e.remindersEdited || draft.reminders != e.draft.reminders
+        editor = e.copy(
+            draft = if (e.source == null) (prefs.value ?: Prefs()).followDefaults(e.draft, draft, edited) else draft,
+            remindersEdited = edited,
+        )
     }
 
     fun closeEditor() {

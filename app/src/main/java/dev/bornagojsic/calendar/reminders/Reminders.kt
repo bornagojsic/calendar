@@ -20,6 +20,7 @@ import dev.bornagojsic.calendar.R
 import dev.bornagojsic.calendar.SNOOZE_MINUTES
 import dev.bornagojsic.calendar.domain.Prefs
 import dev.bornagojsic.calendar.settings
+import java.io.IOException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlin.concurrent.thread
@@ -161,7 +162,12 @@ private fun notify(context: Context, alert: Alert) {
     val time = DateUtils.formatDateRange(context, alert.begin, alert.end, flags)
     val text = if (alert.location.isBlank()) time else "$time · ${alert.location}"
     // Fixed per notification, so the label and the actual snooze always match. Called off the main thread.
-    val snooze = runBlocking { context.settings.data.first()[SNOOZE_MINUTES] } ?: Prefs().snoozeMinutes
+    // An unreadable settings file must not stop the reminder: fall back to the default snooze.
+    val snooze = try {
+        runBlocking { context.settings.data.first()[SNOOZE_MINUTES] }
+    } catch (_: IOException) {
+        null
+    } ?: Prefs().snoozeMinutes
     val n = Notification.Builder(context, CHANNEL)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(alert.title.ifBlank { "(No title)" })

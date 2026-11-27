@@ -125,7 +125,14 @@ private fun DeviceAccounts(accounts: List<String>, hidden: Set<String>, onHidden
                 .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 8.dp),
         ) {
             // Keys are `type/name`; account types don't contain a slash.
-            Text(key.substringAfter('/'), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            val name = key.substringAfter('/')
+            Column(Modifier.weight(1f)) {
+                Text(name, style = MaterialTheme.typography.bodyLarge)
+                // Same name under two account types (e.g. Google and DAVx5): show the type to tell them apart.
+                if (accounts.count { it.substringAfter('/') == name } > 1) {
+                    Text(key.substringBefore('/'), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             Switch(shown, onCheckedChange = null)
         }
     }

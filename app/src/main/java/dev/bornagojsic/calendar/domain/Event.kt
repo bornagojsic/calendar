@@ -95,6 +95,6 @@ data class Prefs(
     fun reminders(allDay: Boolean) = if (allDay) allDayReminders else timedReminders
 
     /** A new event switched to or from all day swaps to the other default reminders, unless the user changed them. */
-    fun followDefaults(old: Draft, new: Draft): Draft =
-        if (new.allDay != old.allDay && new.reminders == reminders(old.allDay)) new.copy(reminders = reminders(new.allDay)) else new
+    fun followDefaults(old: Draft, new: Draft, edited: Boolean): Draft =
+        if (!edited && new.allDay != old.allDay) new.copy(reminders = reminders(new.allDay)) else new
 }

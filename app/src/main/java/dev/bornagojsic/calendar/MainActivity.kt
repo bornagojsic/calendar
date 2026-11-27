@@ -227,7 +227,8 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
                         vm.setMode(it)
                         scope.launch { drawerState.close() }
                     },
-                    calendars = calendars,
+                    // All accounts hidden: show no list rather than the "no calendars on this device" hint.
+                    calendars = calendars.takeUnless { it.isNullOrEmpty() && !allCalendars.isNullOrEmpty() },
                     onToggle = { vm.setVisible(it.id, !it.visible) },
                     onSettings = {
                         settingsOpen = true
