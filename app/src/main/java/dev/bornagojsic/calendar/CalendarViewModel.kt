@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -96,6 +97,15 @@ class CalendarViewModel(
 
     fun select(event: Event?) {
         _selected.value = event
+    }
+
+    /** Shows the occurrence a reminder points at: its day, with its detail sheet open. */
+    fun open(eventId: Long, begin: Instant) {
+        viewModelScope.launch {
+            val event = repo.instance(eventId, begin) ?: return@launch
+            _date.value = event.days(ZoneId.systemDefault()).start
+            _selected.value = event
+        }
     }
 
     /** Snapshot state, not a flow: text fields need synchronous updates. Lives here so edits survive rotation. */

@@ -60,6 +60,11 @@ class CalendarRepository(private val resolver: ContentResolver) {
     fun instances(begin: Instant, end: Instant): Flow<List<Event>> =
         changes(CalendarContract.CONTENT_URI).map { queryInstances(begin, end) }.flowOn(Dispatchers.IO)
 
+    /** The occurrence of [eventId] starting at [begin], or null if it's gone or its calendar is hidden. */
+    suspend fun instance(eventId: Long, begin: Instant): Event? = withContext(Dispatchers.IO) {
+        queryInstances(begin, begin).find { it.eventId == eventId && it.begin == begin }
+    }
+
     /** Emits now and again whenever anything under [uri] changes. */
     private fun changes(uri: Uri): Flow<Unit> = callbackFlow {
         val observer = object : ContentObserver(null) {

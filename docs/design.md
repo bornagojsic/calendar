@@ -90,7 +90,7 @@ Dark only for v1. Dynamic color (Material You) is off.
 
 - The provider broadcasts `CalendarContract.ACTION_EVENT_REMINDER` when a reminder fires. The app registers a receiver and posts a notification from it.
 - This will be the only calendar app on the device, so no other app handles the broadcast and there are no duplicate notifications. No setting to turn reminders off.
-- Notification actions: open the event, snooze (5/10/30 min, through `AlarmManager`), dismiss.
+- Notification: tap opens the event, one "Snooze 1h" action (through `AlarmManager`), swipe dismisses.
 
 ## 7. Module layout
 
