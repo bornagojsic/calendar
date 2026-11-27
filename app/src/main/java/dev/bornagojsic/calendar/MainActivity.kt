@@ -58,6 +58,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -89,6 +92,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.bornagojsic.calendar.data.CalendarRepository
+import dev.bornagojsic.calendar.sync.CalDavAccounts
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import dev.bornagojsic.calendar.ui.drawer.CalendarDrawer
 import dev.bornagojsic.calendar.ui.theme.CalendarTheme
 import kotlinx.coroutines.launch
@@ -180,7 +185,7 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
     // Application context: the ViewModel outlives the Activity.
     val app = LocalContext.current.applicationContext
     val vm: CalendarViewModel = viewModel(factory = viewModelFactory {
-        initializer { CalendarViewModel(CalendarRepository(app.contentResolver), app.settings) }
+        initializer { CalendarViewModel(CalendarRepository(app.contentResolver), app.settings, CalDavAccounts(app)) }
     })
     val calendars by vm.calendars.collectAsStateWithLifecycle()
     val allCalendars by vm.allCalendars.collectAsStateWithLifecycle()
@@ -195,6 +200,7 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     val results by vm.results.collectAsStateWithLifecycle()
+    val accounts by vm.accounts.collectAsStateWithLifecycle()
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val onError: (Throwable) -> Unit = { Toast.makeText(context, "Couldn't save: ${it.message}", Toast.LENGTH_LONG).show() }
@@ -255,6 +261,14 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
                         actions = {
                             IconButton(onClick = { vm.search("") }) { Icon(Icons.Default.Search, contentDescription = "Search") }
                             TodayButton(onClick = { vm.setDate(LocalDate.now()) })
+                            var overflow by remember { mutableStateOf(false) }
+                            IconButton(onClick = { overflow = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
+                            DropdownMenu(overflow, onDismissRequest = { overflow = false }) {
+                                DropdownMenuItem(text = { Text("Refresh") }, onClick = {
+                                    overflow = false
+                                    vm.refresh()
+                                })
+                            }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     )
@@ -263,7 +277,7 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
                     if (query == null) FloatingActionButton(onClick = { create(null) }) { Icon(Icons.Default.Add, contentDescription = "New event") }
                 },
             ) { padding ->
-                Box(Modifier.fillMaxSize().padding(padding)) {
+                PullToRefreshBox(vm.refreshing, vm::refresh, Modifier.fillMaxSize().padding(padding)) {
                     // key: each view keeps its own pager/list state; switching views (or the week start) starts fresh at `date`.
                     if (query != null) results?.let { SearchResults(it, vm::select) } else key(mode, prefs?.weekStart) {
                         when (val m = mode.takeIf { prefs != null }) {
@@ -284,6 +298,7 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
                 it, vm::setWeekStart, vm::setClock24,
                 vm::setDefaultReminders, vm::setEventMinutes, vm::setSnoozeMinutes,
                 allCalendars.orEmpty().map { c -> c.accountKey }.distinct(), vm::setAccountHidden,
+                vm::setSyncMinutes, accounts, vm::addAccount, vm::removeAccount,
                 onClose = { settingsOpen = false },
             )
         }

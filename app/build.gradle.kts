@@ -33,7 +33,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (keystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
@@ -55,6 +55,10 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.dav4jvm) { exclude(group = "org.ogce", module = "xpp3") }
+    implementation(libs.ical4j)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.auth)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
 }

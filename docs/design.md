@@ -15,15 +15,27 @@ Out of scope for v1: home screen widgets, light theme, tasks/to-dos, other users
 ## 2. Data source
 
 ```
-Nextcloud (CalDAV) <-> DAVx5 (sync adapter) <-> Android CalendarProvider <-> Calendar app
+Nextcloud (CalDAV) <-> built-in sync adapter (or DAVx5) <-> Android CalendarProvider <-> Calendar app
 ```
 
-- The app never talks to Nextcloud directly. DAVx5 (free, available on F-Droid and Play) syncs CalDAV into the system `CalendarContract` provider.
-- The app reads and writes `CalendarContract.Calendars`, `Events`, `Instances`, `Reminders` and `Attendees`.
+- The views, search and reminders only read and write the system `CalendarContract` provider: `Calendars`, `Events`, `Instances`, `Reminders` and `Attendees`. Every calendar account on the phone (DAVx5, Google, Exchange, the app's own) shows up with no extra code.
 - `Instances` expands recurring events, so the app never parses RRULEs to display events.
-- Writes go to the provider. DAVx5 pushes them to Nextcloud on its next sync.
-- Permissions: `READ_CALENDAR`, `WRITE_CALENDAR` and `POST_NOTIFICATIONS` (API 33+).
-- Bonus: any other account on the device (Google, Exchange) works with no extra code.
+- Writes go to the provider. The account's sync adapter pushes them to the server.
+
+### Built-in CalDAV sync (`sync/`)
+
+- The app registers its own account type (`dev.bornagojsic.calendar`), an authenticator and a calendar sync adapter, the way DAVx5 does. Settings → Accounts adds an account (server URL, username, app password; the password lives in `AccountManager`) and removes one after a confirm dialog, which deletes its calendars from the phone and leaves the server alone.
+- Discovery: `.well-known/caldav` (else the given URL) → `current-user-principal` → `calendar-home-set` → calendars. Only calendars that hold `VEVENT`s are synced. Name, color and read-only state come from the server.
+- Libraries: `dav4jvm` (WebDAV/CalDAV, from JitPack) and `ical4j` (iCalendar).
+- Provider columns: a calendar's `_SYNC_ID` is its collection URL and `CAL_SYNC1` its ctag. A series master's `_SYNC_ID` is the resource name, `SYNC_DATA1` its etag and `SYNC_DATA2` the iCalendar last seen. Exceptions are rows with `ORIGINAL_SYNC_ID`.
+- Each sync, per calendar: push first, then pull.
+  - Push: dirty or deleted rows, grouped by series, are uploaded as one resource (master plus exceptions) with `If-Match` on the etag, or `If-None-Match: *` for new ones. Cancelled occurrences become `EXDATE`s. Properties the provider doesn't hold (attendees, categories, …) are copied over from `SYNC_DATA2`.
+  - Conflicts: server wins. A 412 re-downloads the server's copy over the local change.
+  - Pull: skipped when the ctag is unchanged. Otherwise the etags of all events are listed, changed ones fetched with `calendar-multiget`, and ones gone from the server deleted.
+- Mapping (`ICal.kt`): `DTSTART`'s `TZID` becomes `EVENT_TIMEZONE`; all-day events are UTC midnights; recurring rows get `DURATION`, others `DTEND`; `EXDATE`/`RDATE` are stored as UTC; `RECURRENCE-ID` events become exception rows; `VALARM`s triggered before the start become `Reminders`.
+- Timing: periodic sync every 15 minutes by default (Settings → Sync every), an upload right after each local edit, and pull-to-refresh (which syncs every account on the phone).
+
+- Permissions: `READ_CALENDAR`, `WRITE_CALENDAR`, `POST_NOTIFICATIONS` (API 33+), plus `INTERNET` and the sync settings/stats permissions for the built-in sync.
 
 ## 3. Stack
 

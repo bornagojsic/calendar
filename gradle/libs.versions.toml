@@ -7,6 +7,9 @@ lifecycle = "2.11.1"
 coreKtx = "1.19.1"
 junit = "4.13.2"
 datastore = "1.3.0"
+dav4jvm = "6.0.0"
+ical4j = "4.4.0"
+ktor = "3.6.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -20,6 +23,10 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+dav4jvm = { group = "com.github.bitfireAT", name = "dav4jvm", version.ref = "dav4jvm" }
+ical4j = { group = "org.mnode.ical4j", name = "ical4j", version.ref = "ical4j" }
+ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
+ktor-client-auth = { group = "io.ktor", name = "ktor-client-auth", version.ref = "ktor" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]

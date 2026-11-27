@@ -122,6 +122,8 @@ data class Prefs(
     val snoozeMinutes: Int = 60,
     /** Keys (`type/name`) of accounts whose calendars are left out of the drawer, views and search. */
     val hiddenAccounts: Set<String> = emptySet(),
+    /** Sync interval of the app's own CalDAV accounts. */
+    val syncMinutes: Int = 15,
 ) {
     fun firstDayOfWeek(locale: Locale = Locale.getDefault()): DayOfWeek = weekStart ?: WeekFields.of(locale).firstDayOfWeek
 

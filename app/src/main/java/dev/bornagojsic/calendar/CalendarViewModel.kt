@@ -4,6 +4,8 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import android.accounts.Account
+import dev.bornagojsic.calendar.sync.CalDavAccounts
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.ViewModel
@@ -53,6 +55,7 @@ enum class ViewMode(val label: String, val days: Int) {
 private val VIEW_MODE = stringPreferencesKey("view_mode")
 private val WEEK_START = stringPreferencesKey("week_start")
 private val CLOCK = stringPreferencesKey("clock")
+private val SYNC_MINUTES = intPreferencesKey("sync_minutes")
 private val TIMED_REMINDERS = stringPreferencesKey("timed_reminders")
 private val ALL_DAY_REMINDERS = stringPreferencesKey("all_day_reminders")
 private val EVENT_MINUTES = intPreferencesKey("event_minutes")
@@ -74,6 +77,7 @@ data class Editor(val draft: Draft, val source: Source?, val remindersEdited: Bo
 class CalendarViewModel(
     private val repo: CalendarRepository,
     private val settings: DataStore<Preferences>,
+    private val caldav: CalDavAccounts,
 ) : ViewModel() {
     /** Every calendar on the device, hidden accounts included. null until the first query finishes. */
     val allCalendars = repo.calendars().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -100,6 +104,7 @@ class CalendarViewModel(
             Prefs(
                 weekStart = DayOfWeek.entries.find { it.name == p[WEEK_START] },
                 clock24 = p[CLOCK]?.let { it == "24" },
+                syncMinutes = p[SYNC_MINUTES] ?: Prefs().syncMinutes,
                 timedReminders = p.reminders(TIMED_REMINDERS) ?: Prefs().timedReminders,
                 allDayReminders = p.reminders(ALL_DAY_REMINDERS) ?: Prefs().allDayReminders,
                 eventMinutes = p[EVENT_MINUTES] ?: Prefs().eventMinutes,
@@ -132,6 +137,50 @@ class CalendarViewModel(
 
     fun setAccountHidden(key: String, hidden: Boolean) {
         viewModelScope.launch { settings.edit { p -> p[HIDDEN_ACCOUNTS] = p[HIDDEN_ACCOUNTS].orEmpty().let { if (hidden) it + key else it - key } } }
+    }
+
+    fun setSyncMinutes(minutes: Int) {
+        viewModelScope.launch { settings.edit { it[SYNC_MINUTES] = minutes } }
+        caldav.setSyncMinutes(minutes)
+    }
+
+    /** The app's own CalDAV accounts. */
+    val accounts = caldav.accounts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Adds a CalDAV account; [onResult] gets null on success, else a message for the user. */
+    fun addAccount(url: String, user: String, password: String, onResult: (String?) -> Unit) =
+        accountOp(onResult) { caldav.add(url, user, password, prefs.value?.syncMinutes ?: Prefs().syncMinutes) }
+
+    /** Removes a CalDAV account; [onResult] gets null on success, else a message for the user. */
+    fun removeAccount(account: Account, onResult: (String?) -> Unit) = accountOp(onResult) { caldav.remove(account) }
+
+    private fun accountOp(onResult: (String?) -> Unit, op: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                op()
+                onResult(null)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onResult(e.message ?: e.javaClass.simpleName)
+            }
+        }
+    }
+
+    /** True while a pull-to-refresh sync runs. */
+    var refreshing by mutableStateOf(false)
+        private set
+
+    fun refresh() {
+        if (refreshing) return
+        refreshing = true
+        viewModelScope.launch {
+            try {
+                caldav.refresh()
+            } finally {
+                refreshing = false
+            }
+        }
     }
 
     private val _query = MutableStateFlow<String?>(null)
@@ -283,6 +332,7 @@ class CalendarViewModel(
         viewModelScope.launch {
             try {
                 block()
+                caldav.upload()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

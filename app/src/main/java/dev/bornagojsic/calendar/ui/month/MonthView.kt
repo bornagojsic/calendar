@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -48,13 +51,14 @@ private val DAY_NUMBER_HEIGHT = 26.dp
 
 /** 6x7 month grid. Tapping a day calls [onDay]. */
 @Composable
-fun MonthView(date: LocalDate, onDate: (LocalDate) -> Unit, onDay: (LocalDate) -> Unit, load: EventLoader) {
+fun MonthView(date: LocalDate, onDate: (LocalDate) -> Unit, onDay: (LocalDate) -> Unit, load: EventLoader) = BoxWithConstraints {
     DatePager(
         date = date,
         onDate = onDate,
         offsetOf = { ChronoUnit.MONTHS.between(BASE, YearMonth.from(it)).toInt() },
         rangeOf = { BASE.plusMonths(it.toLong()).let { m -> m.atDay(1)..m.atEndOfMonth() } },
-        modifier = Modifier.fillMaxSize(),
+        // A vertical scroll with nothing to scroll, so pulling down reaches the pull-to-refresh around it.
+        modifier = Modifier.verticalScroll(rememberScrollState()).height(maxHeight),
     ) { range ->
         val first = weekStart(range.start, firstDayOfWeek())
         val events by remember(range) { load(first, first.plusDays(41)) }.collectAsStateWithLifecycle(emptyList())
