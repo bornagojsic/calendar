@@ -3,5 +3,5 @@
     android:accountType="dev.bornagojsic.calendar"
     android:contentAuthority="com.android.calendar"
     android:supportsUploading="true"
-    android:allowParallelSyncs="true"
+    android:allowParallelSyncs="false"
     android:userVisible="true" />
