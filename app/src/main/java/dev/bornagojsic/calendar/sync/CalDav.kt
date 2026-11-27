@@ -350,6 +350,8 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
             .withSelection("(${Events._ID} = ? OR ${Events.ORIGINAL_ID} = ?) AND ${Events.DIRTY} = $UPLOADING", arrayOf("$id", "$id"))
             .build()
         provider.applyBatch(ops)
+        // The server rewrote the event (seen via the follow-up GET): apply its copy locally too, unless edited meanwhile.
+        if (newIcs != ics) store(calendarId, file, newEtag, newIcs)
     }
 
     /** The server's etag and copy of resource [file], or null if it's gone. */
