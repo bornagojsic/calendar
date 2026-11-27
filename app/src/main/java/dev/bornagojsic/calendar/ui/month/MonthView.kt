@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -81,8 +82,8 @@ private fun MonthPage(month: YearMonth, first: LocalDate, events: List<Event>, o
         }
         for (w in 0L until 6) {
             val days = (0L until 7).map { first.plusDays(w * 7 + it) }
-            val bars = remember(events, first) { layoutBars(events, days, zone) }
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val bars = remember(events, first, zone) { layoutBars(events, days, zone) }
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                 val width = maxWidth / 7
                 val fits = ((maxHeight - DAY_NUMBER_HEIGHT) / pitch).toInt().coerceAtLeast(0)
                 // Keep the last slot for "+k" when not everything fits.

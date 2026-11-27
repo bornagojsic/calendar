@@ -152,7 +152,7 @@ private fun TimeGridPage(
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(start = GUTTER, top = 4.dp, bottom = 4.dp)) {
             Row { days.forEach { day -> Box(Modifier.weight(1f)) { DayLabel(day, day == today) } } }
-            val bars = remember(events, days) { layoutBars(events.filter { it.isBar }, days, zone) }
+            val bars = remember(events, days, zone) { layoutBars(events.filter { it.isBar }, days, zone) }
             // Capped so a pile of all-day events can't squeeze out the time grid.
             BoxWithConstraints(Modifier.fillMaxWidth().heightIn(max = 96.dp).verticalScroll(rememberScrollState())) {
                 val width = maxWidth / days.size
