@@ -78,7 +78,7 @@ fun layoutDay(events: List<Event>, day: LocalDate, zone: ZoneId): List<Placed> {
 /** [first] is the week's first day: the user's setting, or the locale's (see `Prefs`). */
 fun weekStart(date: LocalDate, first: DayOfWeek): LocalDate = date.with(TemporalAdjusters.previousOrSame(first))
 
-/** User overrides from Settings; null follows the phone's locale. */
-data class Prefs(val weekStart: DayOfWeek? = null, val clock24: Boolean? = null) {
+/** User overrides from Settings; null follows the phone's locale. [syncMinutes] is the CalDAV accounts' sync interval. */
+data class Prefs(val weekStart: DayOfWeek? = null, val clock24: Boolean? = null, val syncMinutes: Int = 15) {
     fun firstDayOfWeek(locale: Locale = Locale.getDefault()): DayOfWeek = weekStart ?: WeekFields.of(locale).firstDayOfWeek
 }

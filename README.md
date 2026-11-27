@@ -2,14 +2,14 @@
 
 Android calendar app for a Nextcloud calendar. Layout inspired by Google Calendar; theme and design language inspired by T3 Code.
 
-The app reads and writes the phone's calendar provider and never talks to Nextcloud itself. [DAVx5](https://www.davx5.com/) syncs the provider with Nextcloud. Any other calendar account on the phone shows up too.
+The app syncs CalDAV calendars (Nextcloud first) itself: add an account in Settings → Accounts with the server URL, username and an app password. Accounts synced by [DAVx5](https://www.davx5.com/), Google and others show up too.
 
 Features: Schedule, Day, 3-day, Week and Month views; create, edit and delete events, including recurring ones; reminders with snooze; search; event colors; week start and 12h/24h settings. See [`docs/design.md`](docs/design.md).
 
 ## Install
 
-1. Install DAVx5 and add your Nextcloud account.
-2. Download the APK from [Releases](../../releases) and open it on the phone.
+1. Download the APK from [Releases](../../releases) and open it on the phone.
+2. In Settings → Accounts, add your Nextcloud account (or keep using DAVx5).
 
 Android 8.0 (API 26) or newer.
 

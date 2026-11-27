@@ -3,6 +3,9 @@ package dev.bornagojsic.calendar
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import android.accounts.Account
+import dev.bornagojsic.calendar.sync.CalDavAccounts
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -49,6 +52,7 @@ enum class ViewMode(val label: String, val days: Int) {
 private val VIEW_MODE = stringPreferencesKey("view_mode")
 private val WEEK_START = stringPreferencesKey("week_start")
 private val CLOCK = stringPreferencesKey("clock")
+private val SYNC_MINUTES = intPreferencesKey("sync_minutes")
 
 /** How far around today search looks; Instances expands every recurrence in the range, so keep it bounded. */
 const val SEARCH_YEARS = 2L
@@ -59,6 +63,7 @@ data class Editor(val draft: Draft, val source: Source?)
 class CalendarViewModel(
     private val repo: CalendarRepository,
     private val settings: DataStore<Preferences>,
+    private val caldav: CalDavAccounts,
 ) : ViewModel() {
     /** null until the first query finishes, so the UI can tell "loading" from "no calendars". */
     val calendars = repo.calendars().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -74,6 +79,7 @@ class CalendarViewModel(
             Prefs(
                 weekStart = DayOfWeek.entries.find { it.name == p[WEEK_START] },
                 clock24 = p[CLOCK]?.let { it == "24" },
+                syncMinutes = p[SYNC_MINUTES] ?: Prefs().syncMinutes,
             )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -85,6 +91,48 @@ class CalendarViewModel(
 
     fun setClock24(h24: Boolean?) {
         viewModelScope.launch { settings.edit { p -> h24?.let { p[CLOCK] = if (it) "24" else "12" } ?: p.remove(CLOCK) } }
+    }
+
+    fun setSyncMinutes(minutes: Int) {
+        viewModelScope.launch { settings.edit { it[SYNC_MINUTES] = minutes } }
+        caldav.setSyncMinutes(minutes)
+    }
+
+    /** The app's own CalDAV accounts. */
+    val accounts = caldav.accounts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Adds a CalDAV account; [onResult] gets null on success, else a message for the user. */
+    fun addAccount(url: String, user: String, password: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                caldav.add(url, user, password, prefs.value?.syncMinutes ?: Prefs().syncMinutes)
+                onResult(null)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onResult(e.message ?: e.javaClass.simpleName)
+            }
+        }
+    }
+
+    fun removeAccount(account: Account) {
+        viewModelScope.launch { caldav.remove(account) }
+    }
+
+    /** True while a pull-to-refresh sync runs. */
+    var refreshing by mutableStateOf(false)
+        private set
+
+    fun refresh() {
+        if (refreshing) return
+        refreshing = true
+        viewModelScope.launch {
+            try {
+                caldav.refresh()
+            } finally {
+                refreshing = false
+            }
+        }
     }
 
     private val _query = MutableStateFlow<String?>(null)
@@ -223,6 +271,7 @@ class CalendarViewModel(
         viewModelScope.launch {
             try {
                 block()
+                caldav.upload()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
