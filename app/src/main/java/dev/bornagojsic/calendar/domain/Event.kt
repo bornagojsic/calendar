@@ -78,7 +78,23 @@ fun layoutDay(events: List<Event>, day: LocalDate, zone: ZoneId): List<Placed> {
 /** [first] is the week's first day: the user's setting, or the locale's (see `Prefs`). */
 fun weekStart(date: LocalDate, first: DayOfWeek): LocalDate = date.with(TemporalAdjusters.previousOrSame(first))
 
-/** User overrides from Settings; null follows the phone's locale. */
-data class Prefs(val weekStart: DayOfWeek? = null, val clock24: Boolean? = null) {
+/** User settings; a null [weekStart] or [clock24] follows the phone's locale. */
+data class Prefs(
+    val weekStart: DayOfWeek? = null,
+    val clock24: Boolean? = null,
+    /** Default reminders of new events, in minutes before. */
+    val timedReminders: List<Int> = listOf(10),
+    val allDayReminders: List<Int> = listOf(10),
+    val eventMinutes: Int = 60,
+    val snoozeMinutes: Int = 60,
+    /** Keys (`type/name`) of accounts whose calendars are left out of the drawer, views and search. */
+    val hiddenAccounts: Set<String> = emptySet(),
+) {
     fun firstDayOfWeek(locale: Locale = Locale.getDefault()): DayOfWeek = weekStart ?: WeekFields.of(locale).firstDayOfWeek
+
+    fun reminders(allDay: Boolean) = if (allDay) allDayReminders else timedReminders
+
+    /** A new event switched to or from all day swaps to the other default reminders, unless the user changed them. */
+    fun followDefaults(old: Draft, new: Draft): Draft =
+        if (new.allDay != old.allDay && new.reminders == reminders(old.allDay)) new.copy(reminders = reminders(new.allDay)) else new
 }

@@ -92,8 +92,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 
-private val REMINDER_CHOICES = listOf(0, 5, 10, 15, 30, 60, 120, 1_440, 2_880, 10_080)
-private const val CUSTOM_REMINDER = -1
+internal val REMINDER_CHOICES = listOf(0, 5, 10, 15, 30, 60, 120, 1_440, 2_880, 10_080)
+internal const val CUSTOM_REMINDER = -1
 
 private enum class Dialog { START_DATE, START_TIME, END_DATE, END_TIME, ZONE, REPEAT, CUSTOM, CALENDAR, COLOR, REMINDER, CUSTOM_REMINDER, SCOPE }
 
@@ -366,7 +366,7 @@ private fun ZoneDialog(onPick: (ZoneId) -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun <T> ChoiceDialog(items: List<T>, selected: T?, label: (T) -> String, onPick: (T) -> Unit, onDismiss: () -> Unit) {
+internal fun <T> ChoiceDialog(items: List<T>, selected: T?, label: (T) -> String, onPick: (T) -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         text = {

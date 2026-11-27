@@ -171,7 +171,8 @@ private fun PermissionScreen(onResult: () -> Unit) {
     }
 }
 
-private val Context.settings by preferencesDataStore("settings")
+/** One instance per process: the reminder receivers read it too. */
+internal val Context.settings by preferencesDataStore("settings")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -182,6 +183,7 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
         initializer { CalendarViewModel(CalendarRepository(app.contentResolver), app.settings) }
     })
     val calendars by vm.calendars.collectAsStateWithLifecycle()
+    val allCalendars by vm.allCalendars.collectAsStateWithLifecycle()
     val mode by vm.mode.collectAsStateWithLifecycle()
     val date by vm.date.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -276,7 +278,14 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
                 }
             }
         }
-        if (settingsOpen) prefs?.let { SettingsScreen(it, vm::setWeekStart, vm::setClock24, onClose = { settingsOpen = false }) }
+        if (settingsOpen) prefs?.let {
+            SettingsScreen(
+                it, vm::setWeekStart, vm::setClock24,
+                vm::setDefaultReminders, vm::setEventMinutes, vm::setSnoozeMinutes,
+                allCalendars.orEmpty().map { c -> c.accountKey }.distinct(), vm::setAccountHidden,
+                onClose = { settingsOpen = false },
+            )
+        }
         if (picking) DateDialog(date, onPick = { vm.setDate(it) }, onDismiss = { picking = false })
         selected?.let { event ->
             EventSheet(
@@ -288,13 +297,14 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
             )
         }
         vm.editor?.let {
-            val cal = calendars?.find { c -> c.id == it.draft.calendarId }
+            // All calendars: a reminder can open an event of a hidden account.
+            val cal = allCalendars?.find { c -> c.id == it.draft.calendarId }
             val palette by produceState(emptyList<EventColor>(), cal?.account, cal?.accountType) {
                 // Clear first: the old account's colors mustn't stay pickable while the new ones load.
                 value = emptyList()
                 value = cal?.let { c -> vm.palette(c) }.orEmpty()
             }
-            EventEditor(it, calendars.orEmpty(), palette, vm.writing, vm::update, onSave = { s -> vm.save(s, onError) }, onClose = vm::closeEditor)
+            EventEditor(it, calendars.orEmpty() + listOfNotNull(cal?.takeIf { c -> c !in calendars.orEmpty() }), palette, vm.writing, vm::update, onSave = { s -> vm.save(s, onError) }, onClose = vm::closeEditor)
         }
     }
 }
