@@ -17,10 +17,15 @@ import android.provider.CalendarContract.Instances
 import android.text.format.DateUtils
 import dev.bornagojsic.calendar.MainActivity
 import dev.bornagojsic.calendar.R
+import dev.bornagojsic.calendar.SNOOZE_MINUTES
+import dev.bornagojsic.calendar.domain.Prefs
+import dev.bornagojsic.calendar.settings
+import java.io.IOException
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlin.concurrent.thread
 
 private const val CHANNEL = "reminders"
-private const val SNOOZE_MS = 60 * 60 * 1000L
 private const val ACTION_SNOOZE = "dev.bornagojsic.calendar.SNOOZE"
 private const val ACTION_SNOOZED = "dev.bornagojsic.calendar.SNOOZED"
 const val EXTRA_EVENT_ID = "event_id"
@@ -29,6 +34,10 @@ private const val EXTRA_END = "end"
 private const val EXTRA_TITLE = "title"
 private const val EXTRA_ALL_DAY = "all_day"
 private const val EXTRA_LOCATION = "location"
+private const val EXTRA_SNOOZE = "snooze_minutes"
+
+/** The snooze action's label, e.g. "Snooze 15m" or "Snooze 1h". */
+fun snoozeLabel(minutes: Int) = "Snooze " + if (minutes % 60 == 0) "${minutes / 60}h" else "${minutes}m"
 
 /** One occurrence to remind about; also the payload carried through a snooze. */
 private data class Alert(
@@ -95,7 +104,7 @@ class SnoozeReceiver : BroadcastReceiver() {
                 context.getSystemService(NotificationManager::class.java).cancel(alert.tag, 0)
                 // shortcut: AlarmManager alarms don't survive a reboot, so a snooze pending at shutdown is lost.
                 val am = context.getSystemService(AlarmManager::class.java)
-                val at = System.currentTimeMillis() + SNOOZE_MS
+                val at = System.currentTimeMillis() + intent.getIntExtra(EXTRA_SNOOZE, Prefs().snoozeMinutes) * 60_000L
                 val fire = broadcast(context, ACTION_SNOOZED, alert)
                 if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) {
                     am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, fire)
@@ -132,8 +141,8 @@ private fun current(context: Context, alert: Alert): Alert? {
     }
 }
 
-private fun broadcast(context: Context, action: String, alert: Alert): PendingIntent {
-    val intent = alert.into(Intent(action).setClass(context, SnoozeReceiver::class.java))
+private fun broadcast(context: Context, action: String, alert: Alert, snoozeMinutes: Int = 0): PendingIntent {
+    val intent = alert.into(Intent(action).setClass(context, SnoozeReceiver::class.java)).putExtra(EXTRA_SNOOZE, snoozeMinutes)
     // Unique per occurrence and action, so snoozes of different events don't replace each other.
     return PendingIntent.getBroadcast(context, (alert.tag + action).hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 }
@@ -152,6 +161,13 @@ private fun notify(context: Context, alert: Alert) {
         if (alert.allDay) DateUtils.FORMAT_UTC else DateUtils.FORMAT_SHOW_TIME
     val time = DateUtils.formatDateRange(context, alert.begin, alert.end, flags)
     val text = if (alert.location.isBlank()) time else "$time · ${alert.location}"
+    // Fixed per notification, so the label and the actual snooze always match. Called off the main thread.
+    // An unreadable settings file must not stop the reminder: fall back to the default snooze.
+    val snooze = try {
+        runBlocking { context.settings.data.first()[SNOOZE_MINUTES] }
+    } catch (_: IOException) {
+        null
+    } ?: Prefs().snoozeMinutes
     val n = Notification.Builder(context, CHANNEL)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(alert.title.ifBlank { "(No title)" })
@@ -159,7 +175,7 @@ private fun notify(context: Context, alert: Alert) {
         .setCategory(Notification.CATEGORY_EVENT)
         .setContentIntent(tap)
         .setAutoCancel(true)
-        .addAction(Notification.Action.Builder(null, "Snooze 1h", broadcast(context, ACTION_SNOOZE, alert)).build())
+        .addAction(Notification.Action.Builder(null, snoozeLabel(snooze), broadcast(context, ACTION_SNOOZE, alert, snooze)).build())
         .build()
     nm.notify(alert.tag, 0, n)
 }

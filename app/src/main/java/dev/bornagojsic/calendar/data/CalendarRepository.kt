@@ -43,7 +43,10 @@ data class CalendarInfo(
     val color: Int,
     val visible: Boolean,
     val writable: Boolean,
-)
+) {
+    /** Identifies the account in `Prefs.hiddenAccounts`. */
+    val accountKey get() = "$accountType/$account"
+}
 
 /** One entry of an account's event color palette; [key] is what the event row stores. */
 data class EventColor(val key: String, val color: Int)
@@ -62,17 +65,17 @@ class CalendarRepository(private val resolver: ContentResolver) {
         changes(Calendars.CONTENT_URI).map { queryCalendars() }.flowOn(Dispatchers.IO)
 
     /** Occurrences of events in visible calendars that overlap [begin, end), re-queried on any provider change. */
-    fun instances(begin: Instant, end: Instant): Flow<List<Event>> =
-        changes(CalendarContract.CONTENT_URI).map { queryInstances(begin, end) }.flowOn(Dispatchers.IO)
+    fun instances(begin: Instant, end: Instant, hidden: Set<Long> = emptySet()): Flow<List<Event>> =
+        changes(CalendarContract.CONTENT_URI).map { queryInstances(begin, end, hidden = hidden) }.flowOn(Dispatchers.IO)
 
     /**
      * Occurrences in [begin, end) matching [query], re-queried on any provider change. The provider's search URI
      * matches every word (case-insensitive LIKE) against title, description, location and attendee names/emails.
      */
-    fun search(query: String, begin: Instant, end: Instant): Flow<List<Event>> =
-        changes(CalendarContract.CONTENT_URI).map { queryInstances(begin, end, query) }.flowOn(Dispatchers.IO)
+    fun search(query: String, begin: Instant, end: Instant, hidden: Set<Long> = emptySet()): Flow<List<Event>> =
+        changes(CalendarContract.CONTENT_URI).map { queryInstances(begin, end, query, hidden) }.flowOn(Dispatchers.IO)
 
-    /** The occurrence of [eventId] starting at [begin], or null if it's gone or its calendar is hidden. */
+    /** The occurrence of [eventId] starting at [begin], or null if it's gone or its calendar is hidden. Hidden accounts still count: their reminders notify. */
     suspend fun instance(eventId: Long, begin: Instant): Event? = withContext(Dispatchers.IO) {
         queryInstances(begin, begin).find { it.eventId == eventId && it.begin == begin }
     }
@@ -133,7 +136,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
         } ?: emptyList()
     }
 
-    private fun queryInstances(begin: Instant, end: Instant, search: String? = null): List<Event> {
+    private fun queryInstances(begin: Instant, end: Instant, search: String? = null, hidden: Set<Long> = emptySet()): List<Event> {
         val uri = (if (search == null) Instances.CONTENT_URI else Instances.CONTENT_SEARCH_URI).buildUpon().also {
             ContentUris.appendId(it, begin.toEpochMilli())
             ContentUris.appendId(it, end.toEpochMilli())
@@ -149,7 +152,9 @@ class CalendarRepository(private val resolver: ContentResolver) {
             Instances.DISPLAY_COLOR,
         )
         val sort = "${Instances.BEGIN}, ${Instances.END} DESC"
-        return resolver.query(uri, projection, "${Instances.VISIBLE} = 1 AND (${Instances.STATUS} IS NULL OR ${Instances.STATUS} != ${Instances.STATUS_CANCELED})", null, sort)?.use { c ->
+        var where = "${Instances.VISIBLE} = 1 AND (${Instances.STATUS} IS NULL OR ${Instances.STATUS} != ${Instances.STATUS_CANCELED})"
+        if (hidden.isNotEmpty()) where += " AND ${Instances.CALENDAR_ID} NOT IN (${hidden.joinToString()})"
+        return resolver.query(uri, projection, where, null, sort)?.use { c ->
             buildList {
                 while (c.moveToNext()) {
                     add(
