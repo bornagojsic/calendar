@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import android.accounts.Account
 import dev.bornagojsic.calendar.sync.CalDavAccounts
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -21,6 +22,8 @@ import dev.bornagojsic.calendar.domain.Prefs
 import dev.bornagojsic.calendar.domain.Source
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
@@ -53,20 +56,42 @@ private val VIEW_MODE = stringPreferencesKey("view_mode")
 private val WEEK_START = stringPreferencesKey("week_start")
 private val CLOCK = stringPreferencesKey("clock")
 private val SYNC_MINUTES = intPreferencesKey("sync_minutes")
+private val TIMED_REMINDERS = stringPreferencesKey("timed_reminders")
+private val ALL_DAY_REMINDERS = stringPreferencesKey("all_day_reminders")
+private val EVENT_MINUTES = intPreferencesKey("event_minutes")
+private val HIDDEN_ACCOUNTS = stringSetPreferencesKey("hidden_accounts")
+
+/** Read by the reminder notification too. */
+internal val SNOOZE_MINUTES = intPreferencesKey("snooze_minutes")
+
+/** Comma-separated minutes; an empty string is no reminders. */
+private fun Preferences.reminders(key: Preferences.Key<String>) = this[key]?.split(',')?.mapNotNull { it.toIntOrNull() }
 
 /** How far around today search looks; Instances expands every recurrence in the range, so keep it bounded. */
 const val SEARCH_YEARS = 2L
 
 /** The open editor: a draft, and the occurrence it edits (null for a new event). */
-data class Editor(val draft: Draft, val source: Source?)
+/** [remindersEdited]: the user changed the reminders, so an all-day switch keeps them instead of swapping defaults. */
+data class Editor(val draft: Draft, val source: Source?, val remindersEdited: Boolean = false)
 
 class CalendarViewModel(
     private val repo: CalendarRepository,
     private val settings: DataStore<Preferences>,
     private val caldav: CalDavAccounts,
 ) : ViewModel() {
-    /** null until the first query finishes, so the UI can tell "loading" from "no calendars". */
-    val calendars = repo.calendars().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    /** Every calendar on the device, hidden accounts included. null until the first query finishes. */
+    val allCalendars = repo.calendars().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val hiddenAccounts = settings.data.map { it[HIDDEN_ACCOUNTS].orEmpty() }.distinctUntilChanged()
+
+    /** Calendars outside hidden accounts. null until the first query finishes, so the UI can tell "loading" from "no calendars". */
+    val calendars = combine(allCalendars.filterNotNull(), hiddenAccounts) { cals, hidden -> cals.filter { it.accountKey !in hidden } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Ids of calendars in hidden accounts, left out of views and search. */
+    private val hiddenIds = combine(allCalendars.filterNotNull(), hiddenAccounts) { cals, hidden ->
+        cals.filter { it.accountKey in hidden }.map { it.id }.toSet()
+    }.distinctUntilChanged()
 
     /** Last used view, Schedule on first launch. null while DataStore loads, so the UI doesn't flash the default. */
     val mode = settings.data
@@ -80,6 +105,11 @@ class CalendarViewModel(
                 weekStart = DayOfWeek.entries.find { it.name == p[WEEK_START] },
                 clock24 = p[CLOCK]?.let { it == "24" },
                 syncMinutes = p[SYNC_MINUTES] ?: Prefs().syncMinutes,
+                timedReminders = p.reminders(TIMED_REMINDERS) ?: Prefs().timedReminders,
+                allDayReminders = p.reminders(ALL_DAY_REMINDERS) ?: Prefs().allDayReminders,
+                eventMinutes = p[EVENT_MINUTES] ?: Prefs().eventMinutes,
+                snoozeMinutes = p[SNOOZE_MINUTES] ?: Prefs().snoozeMinutes,
+                hiddenAccounts = p[HIDDEN_ACCOUNTS].orEmpty(),
             )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -91,6 +121,22 @@ class CalendarViewModel(
 
     fun setClock24(h24: Boolean?) {
         viewModelScope.launch { settings.edit { p -> h24?.let { p[CLOCK] = if (it) "24" else "12" } ?: p.remove(CLOCK) } }
+    }
+
+    fun setDefaultReminders(allDay: Boolean, minutes: List<Int>) {
+        viewModelScope.launch { settings.edit { it[if (allDay) ALL_DAY_REMINDERS else TIMED_REMINDERS] = minutes.joinToString(",") } }
+    }
+
+    fun setEventMinutes(minutes: Int) {
+        viewModelScope.launch { settings.edit { it[EVENT_MINUTES] = minutes } }
+    }
+
+    fun setSnoozeMinutes(minutes: Int) {
+        viewModelScope.launch { settings.edit { it[SNOOZE_MINUTES] = minutes } }
+    }
+
+    fun setAccountHidden(key: String, hidden: Boolean) {
+        viewModelScope.launch { settings.edit { p -> p[HIDDEN_ACCOUNTS] = p[HIDDEN_ACCOUNTS].orEmpty().let { if (hidden) it + key else it - key } } }
     }
 
     fun setSyncMinutes(minutes: Int) {
@@ -152,7 +198,8 @@ class CalendarViewModel(
         .map { it?.trim().orEmpty() }
         .distinctUntilChanged()
         .debounce(250)
-        .flatMapLatest { q ->
+        .let { combine(it, hiddenIds, ::Pair) }
+        .flatMapLatest { (q, hidden) ->
             if (q.isEmpty()) return@flatMapLatest flowOf(null)
             val today = LocalDate.now()
             val zone = ZoneId.systemDefault()
@@ -160,6 +207,7 @@ class CalendarViewModel(
                 q,
                 today.minusYears(SEARCH_YEARS).atStartOfDay(zone).toInstant(),
                 today.plusYears(SEARCH_YEARS).atStartOfDay(zone).toInstant(),
+                hidden,
             )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -181,15 +229,19 @@ class CalendarViewModel(
         _date.value = date
     }
 
-    /** Occurrences touching any day in [first, last]. */
+    /** Occurrences touching any day in [first, last], outside hidden accounts. */
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun events(first: LocalDate, last: LocalDate): Flow<List<Event>> {
         val zone = ZoneId.systemDefault()
         val range = first..last
         // Pad a day each side: all-day events sit on UTC midnights, which can fall outside the local window.
-        return repo.instances(
-            first.minusDays(1).atStartOfDay(zone).toInstant(),
-            last.plusDays(2).atStartOfDay(zone).toInstant(),
-        ).map { list -> list.filter { e -> e.days(zone).let { it.start <= range.endInclusive && it.endInclusive >= range.start } } }
+        return hiddenIds.flatMapLatest { hidden ->
+            repo.instances(
+                first.minusDays(1).atStartOfDay(zone).toInstant(),
+                last.plusDays(2).atStartOfDay(zone).toInstant(),
+                hidden,
+            )
+        }.map { list -> list.filter { e -> e.days(zone).let { it.start <= range.endInclusive && it.endInclusive >= range.start } } }
     }
 
     private val _selected = MutableStateFlow<Event?>(null)
@@ -219,11 +271,12 @@ class CalendarViewModel(
     var editor by mutableStateOf<Editor?>(null)
         private set
 
-    /** Opens the editor for a new event at [start], one hour long. False when there's no calendar to write to. */
+    /** Opens the editor for a new event at [start], with the default length and reminders. False when there's no calendar to write to. */
     fun create(start: LocalDateTime = defaultStart()): Boolean {
         val cals = calendars.value.orEmpty().filter { it.writable }
         val cal = cals.firstOrNull { it.visible } ?: cals.firstOrNull() ?: return false
-        editor = Editor(Draft(calendarId = cal.id, start = start, end = start.plusHours(1)), null)
+        val p = prefs.value ?: Prefs()
+        editor = Editor(Draft(calendarId = cal.id, start = start, end = start.plusMinutes(p.eventMinutes.toLong()), reminders = p.timedReminders), null)
         return true
     }
 
@@ -239,7 +292,13 @@ class CalendarViewModel(
 
     /** Ignored while a save runs: its success closes the editor, which would drop anything typed meanwhile. */
     fun update(draft: Draft) {
-        if (!writing) editor = editor?.copy(draft = draft)
+        if (writing) return
+        val e = editor ?: return
+        val edited = e.remindersEdited || draft.reminders != e.draft.reminders
+        editor = e.copy(
+            draft = if (e.source == null) (prefs.value ?: Prefs()).followDefaults(e.draft, draft, edited) else draft,
+            remindersEdited = edited,
+        )
     }
 
     fun closeEditor() {
