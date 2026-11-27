@@ -78,7 +78,7 @@ data class Draft(
             start = to,
             end = to.plus(Duration.between(start, end)),
             // Swap only the BYDAY value, so the rest of the rule (an exact UNTIL, WKST) stays as written.
-            rrule = if (follows) rrule!!.replace("BYDAY=${dayCode(start.dayOfWeek)}", "BYDAY=${dayCode(to.dayOfWeek)}") else rrule,
+            rrule = if (follows) rrule!!.replace(Regex("BYDAY=[^;]*"), "BYDAY=${dayCode(to.dayOfWeek)}") else rrule,
         )
     }
 

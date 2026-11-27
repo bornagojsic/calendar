@@ -120,8 +120,9 @@ class CalendarViewModel(
         editor = Editor(Draft.of(source), source)
     }
 
+    /** Ignored while a save runs: its success closes the editor, which would drop anything typed meanwhile. */
     fun update(draft: Draft) {
-        editor = editor?.copy(draft = draft)
+        if (!writing) editor = editor?.copy(draft = draft)
     }
 
     fun closeEditor() {
