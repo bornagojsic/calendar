@@ -88,8 +88,9 @@ import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 
 private val REMINDER_CHOICES = listOf(0, 5, 10, 15, 30, 60, 120, 1_440, 2_880, 10_080)
+private const val CUSTOM_REMINDER = -1
 
-private enum class Dialog { START_DATE, START_TIME, END_DATE, END_TIME, ZONE, REPEAT, CUSTOM, CALENDAR, REMINDER, SCOPE }
+private enum class Dialog { START_DATE, START_TIME, END_DATE, END_TIME, ZONE, REPEAT, CUSTOM, CALENDAR, REMINDER, CUSTOM_REMINDER, SCOPE }
 
 /** Full-screen editor for a new or existing event. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -212,8 +213,14 @@ fun EventEditor(
         )
         Dialog.CALENDAR -> ChoiceDialog(writable, calendar, { it.name }, { onChange(d.copy(calendarId = it.id)) }, ::dismiss)
         Dialog.REMINDER -> ChoiceDialog(
-            REMINDER_CHOICES - d.reminders.toSet(), null, ::reminderLabel,
-            { onChange(d.copy(reminders = (d.reminders + it).sorted())) }, ::dismiss,
+            REMINDER_CHOICES - d.reminders.toSet() + CUSTOM_REMINDER, null,
+            { if (it == CUSTOM_REMINDER) "Custom…" else reminderLabel(it) },
+            { if (it == CUSTOM_REMINDER) dialog = Dialog.CUSTOM_REMINDER else onChange(d.copy(reminders = (d.reminders + it).sorted())) },
+            ::dismiss,
+        )
+        Dialog.CUSTOM_REMINDER -> ReminderDialog(
+            { if (it !in d.reminders) onChange(d.copy(reminders = (d.reminders + it).sorted())) },
+            ::dismiss,
         )
         Dialog.SCOPE -> ScopeDialog(
             title = "Save recurring event",
@@ -448,4 +455,41 @@ private fun EndOption(selected: Boolean, text: String, modifier: Modifier = Modi
         RadioButton(selected, onClick = null)
         Text(text, Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp))
     }
+}
+
+private enum class ReminderUnit(val minutes: Int) { MINUTE(1), HOUR(60), DAY(1_440), WEEK(10_080) }
+
+/** Number plus unit, returned as minutes before the event. Shared with the default reminders setting. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun ReminderDialog(onDone: (Int) -> Unit, onDismiss: () -> Unit) {
+    var amount by remember { mutableStateOf("") }
+    var unit by remember { mutableStateOf(ReminderUnit.MINUTE) }
+    val n = amount.toIntOrNull()?.takeIf { it > 0 }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Custom notification") },
+        text = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    // Four digits keep weeks in Int range.
+                    amount, { amount = it.filter(Char::isDigit).take(4) },
+                    Modifier.width(72.dp), singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ReminderUnit.entries.forEach {
+                        FilterChip(unit == it, { unit = it }, { Text(it.name.lowercase() + if (n == 1) "" else "s") })
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = n != null, onClick = {
+                onDone(n!! * unit.minutes)
+                onDismiss()
+            }) { Text("Done") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
