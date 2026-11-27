@@ -128,14 +128,16 @@ fun exdate(instance: Instant, allDay: Boolean): String =
     if (allDay) instance.atZone(ZoneOffset.UTC).toLocalDate().format(DATE) else instance.atZone(ZoneOffset.UTC).format(UTC_TIME)
 
 /**
- * Moves each EXDATE in [exdate] by [by], so occurrences deleted from a series stay deleted when the series moves.
+ * Moves each EXDATE in [exdate] by the wall-clock amount [by] in [zone], the way the series itself moves, so
+ * occurrences deleted from a series stay deleted when it moves (also across a DST change).
  * shortcut: only UTC ("...Z") and date-only values are shifted; TZID-local values are kept as they are.
  */
-fun shiftExdate(exdate: String, by: Duration): String = exdate.split(',').joinToString(",") {
+fun shiftExdate(exdate: String, by: Duration, zone: ZoneId): String = exdate.split(',').joinToString(",") {
     when {
         it.endsWith("Z") -> runCatching {
             LocalDateTime.parse(it.removeSuffix("Z"), DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss"))
-                .plus(by).format(DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss")) + "Z"
+                .atOffset(ZoneOffset.UTC).atZoneSameInstant(zone).toLocalDateTime().plus(by)
+                .atZone(zone).withZoneSameInstant(ZoneOffset.UTC).format(UTC_TIME)
         }.getOrDefault(it)
         it.length == 8 -> runCatching { LocalDate.parse(it, DATE).plusDays(by.toDays()).format(DATE) }.getOrDefault(it)
         else -> it

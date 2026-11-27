@@ -236,7 +236,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
                     .build()
                 // The provider may copy the master's reminders onto the exception; replace them.
                 ops += ContentProviderOperation.newDelete(Reminders.CONTENT_URI)
-                    .withSelection("${Reminders.EVENT_ID} = ?", arrayOf(""))
+                    .withSelection("${Reminders.EVENT_ID} = ? AND $ALERTS", arrayOf(""))
                     .withSelectionBackReference(0, at)
                     .build()
                 addReminders(ops, draft.reminders) { it.withValueBackReference(Reminders.EVENT_ID, at) }
@@ -246,10 +246,10 @@ class CalendarRepository(private val resolver: ContentResolver) {
                 // The draft holds this occurrence's times; move the series start, and its EXDATEs, by the same
                 // wall-clock amount, so a move across a DST change keeps the hour.
                 val zone = if (d.allDay) ZoneOffset.UTC else d.zone
-                val moved = LocalDateTime.ofInstant(d.seriesStart, zone) +
-                    Duration.between(LocalDateTime.ofInstant(src.originalTime, zone), draft.start)
+                val wallShift = Duration.between(LocalDateTime.ofInstant(src.originalTime, zone), draft.start)
+                val moved = LocalDateTime.ofInstant(d.seriesStart, zone) + wallShift
                 val begin = if (draft.allDay) moved.toLocalDate().atStartOfDay(ZoneOffset.UTC).toInstant() else moved.atZone(draft.zone).toInstant()
-                update(ops, d.seriesId, draft, begin = begin, exdate = d.exdate?.let { shiftExdate(it, Duration.between(d.seriesStart, begin)) })
+                update(ops, d.seriesId, draft, begin = begin, exdate = d.exdate?.let { shiftExdate(it, wallShift, zone) })
             }
             else -> {
                 val at = src.originalTime
@@ -261,7 +261,9 @@ class CalendarRepository(private val resolver: ContentResolver) {
                 else draft.rrule!!.replace("COUNT=$count", "COUNT=${(count - occurrencesBefore(d, at)).coerceAtLeast(1)}")
                 truncate(ops, d, at)
                 // Occurrences deleted after the split stay deleted, moved by however far this one moved.
-                val exdate = exdatesFrom(d.exdate, at, d.allDay)?.let { shiftExdate(it, Duration.between(at, draft.begin())) }
+                val zone = if (d.allDay) ZoneOffset.UTC else d.zone
+                val wallShift = Duration.between(LocalDateTime.ofInstant(at, zone), draft.start)
+                val exdate = exdatesFrom(d.exdate, at, d.allDay)?.let { shiftExdate(it, wallShift, zone) }
                 insert(ops, draft.copy(rrule = rrule), exdate = if (rrule != null) exdate else null)
             }
         }

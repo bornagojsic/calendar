@@ -59,8 +59,10 @@ class RecurrenceTest {
     fun shiftsExdates() {
         assertEquals(
             "20261223T180000Z,20261230,Europe/Zagreb;20261229T190000",
-            shiftExdate("20261222T170000Z,20261229,Europe/Zagreb;20261229T190000", java.time.Duration.ofDays(1).plusHours(1)),
+            shiftExdate("20261222T170000Z,20261229,Europe/Zagreb;20261229T190000", java.time.Duration.ofDays(1).plusHours(1), zone),
         )
+        // A week of wall-clock time across the 29 Mar DST change: 09:00 CET (08:00Z) to 09:00 CEST (07:00Z).
+        assertEquals("20260330T070000Z", shiftExdate("20260323T080000Z", java.time.Duration.ofDays(7), zone))
         assertEquals("20261222T170000Z", exdate(Instant.parse("2026-12-22T17:00:00Z"), allDay = false))
     }
 
