@@ -202,9 +202,11 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
             if (!r.isSuccess() || !r.error.isNullOrEmpty()) complete = false
             else if (r.href != url) remote[r.hrefName()] = r[GetETag::class.java]?.eTag
         }
+        // A new series gets its name before its first upload; until one succeeds (SYNC_DATA2 set) it isn't the server's to delete.
         val local = provider.query(
             eventsUri, arrayOf(Events._ID, Events._SYNC_ID, Events.SYNC_DATA1),
-            "${Events.CALENDAR_ID} = ? AND ${Events.ORIGINAL_ID} IS NULL AND ${Events._SYNC_ID} IS NOT NULL", arrayOf("$calendarId"), null,
+            "${Events.CALENDAR_ID} = ? AND ${Events.ORIGINAL_ID} IS NULL AND ${Events._SYNC_ID} IS NOT NULL AND ${Events.SYNC_DATA2} IS NOT NULL",
+            arrayOf("$calendarId"), null,
         )?.use { c -> buildMap { while (c.moveToNext()) put(c.getString(1), c.getLong(0) to c.getString(2)) } }.orEmpty()
         if (complete) local.filterKeys { it !in remote }.values.forEach { deleteSeries(it.first) }
         // Names not downloaded yet; any left over, or an incomplete listing, keep the old ctag, so the next sync fetches them again.
@@ -259,17 +261,24 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
         val live = exceptions.filter { it.long(Events.DELETED) != 1L }
         val uid = master.string(Events.UID_2445) ?: UUID.randomUUID().toString()
         val file = name ?: "$uid.ics"
+        // Saved before the PUT, so a retry after a lost response reuses them and gets a 412 instead of making a duplicate.
+        if (name == null) provider.update(
+            ContentUris.withAppendedId(eventsUri, id), ContentValues().apply {
+                put(Events._SYNC_ID, file)
+                put(Events.UID_2445, uid)
+            }, null, null,
+        )
         val ics = toICal(master.copy(values = master.values + (Events.UID_2445 to uid)), live, master.string(Events.SYNC_DATA2))
         val newEtag = try {
             DavResource(client, member(url, file)).put(
                 TextContent(ics, DavCalendar.MIME_ICALENDAR_UTF8),
-                if (name == null) headersOf(HttpHeaders.IfNoneMatch, "*") else ifMatch,
+                // Never uploaded successfully (no SYNC_DATA2): create only, never overwrite.
+                if (master.string(Events.SYNC_DATA2) == null) headersOf(HttpHeaders.IfNoneMatch, "*") else ifMatch,
             ) { GetETag.fromHttpResponse(it)?.eTag }
         } catch (_: PreconditionFailedException) {
             // Server wins: replace the local change with the server's copy, or drop it if the server deleted it.
+            // The row already has _SYNC_ID = file, so store() overwrites it in place, even if it has no etag yet.
             download(calendarId, url, file, id)
-            // A new row has no _SYNC_ID, so store() added the server copy as another row; drop the local one.
-            if (name == null) deleteSeries(id)
             return
         }
         val ops = arrayListOf(
