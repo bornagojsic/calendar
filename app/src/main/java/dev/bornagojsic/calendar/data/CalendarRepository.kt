@@ -16,6 +16,7 @@ import dev.bornagojsic.calendar.domain.Event
 import dev.bornagojsic.calendar.domain.EventDetails
 import dev.bornagojsic.calendar.domain.Source
 import dev.bornagojsic.calendar.domain.exdate
+import dev.bornagojsic.calendar.domain.exdatesFrom
 import dev.bornagojsic.calendar.domain.shiftExdate
 import dev.bornagojsic.calendar.domain.untilBefore
 import dev.bornagojsic.calendar.domain.withUntil
@@ -240,11 +241,38 @@ class CalendarRepository(private val resolver: ContentResolver) {
                 update(ops, d.seriesId, draft, begin = d.seriesStart + shift, exdate = d.exdate?.let { shiftExdate(it, shift) })
             }
             else -> {
-                truncate(ops, d, src.originalTime)
-                insert(ops, draft)
+                val at = src.originalTime
+                // An unchanged COUNT counts from the series start; the new series gets what's left.
+                val rrule = draft.rrule?.let { r ->
+                    val count = Regex("COUNT=(\\d+)").find(r)?.groupValues?.get(1)?.toInt()
+                    if (count == null || r != d.rrule) r
+                    else r.replace("COUNT=$count", "COUNT=${(count - occurrencesBefore(d, at)).coerceAtLeast(1)}")
+                }
+                truncate(ops, d, at)
+                // Occurrences deleted after the split stay deleted, moved by however far this one moved.
+                val exdate = exdatesFrom(d.exdate, at, d.allDay)?.let { shiftExdate(it, Duration.between(at, draft.begin())) }
+                insert(ops, draft.copy(rrule = rrule), exdate = if (rrule != null) exdate else null)
             }
         }
         resolver.applyBatch(CalendarContract.AUTHORITY, ops)
+    }
+
+    /** Occurrences the series generated before [at]: still listed, moved or cancelled (exceptions), or excluded. */
+    private fun occurrencesBefore(d: EventDetails, at: Instant): Int {
+        val uri = Instances.CONTENT_URI.buildUpon().also {
+            ContentUris.appendId(it, d.seriesStart.toEpochMilli())
+            ContentUris.appendId(it, at.toEpochMilli())
+        }.build()
+        val listed = resolver.query(
+            uri, arrayOf(Instances._ID), "${Instances.EVENT_ID} = ? AND ${Instances.BEGIN} < ?",
+            arrayOf("${d.seriesId}", "${at.toEpochMilli()}"), null,
+        )?.use { it.count } ?: 0
+        val exceptions = resolver.query(
+            Events.CONTENT_URI, arrayOf(Events._ID), "${Events.ORIGINAL_ID} = ? AND ${Events.ORIGINAL_INSTANCE_TIME} < ?",
+            arrayOf("${d.seriesId}", "${at.toEpochMilli()}"), null,
+        )?.use { it.count } ?: 0
+        val excluded = d.exdate.orEmpty().split(',').count { it.isNotBlank() } - (exdatesFrom(d.exdate, at, d.allDay)?.split(',')?.size ?: 0)
+        return listed + exceptions + excluded
     }
 
     /** Deletes [src] across [scope]. */
@@ -306,9 +334,11 @@ class CalendarRepository(private val resolver: ContentResolver) {
         put(Events.RRULE, d.rrule)
     }
 
-    private fun insert(ops: ArrayList<ContentProviderOperation>, draft: Draft) {
+    private fun insert(ops: ArrayList<ContentProviderOperation>, draft: Draft, exdate: String? = null) {
         val at = ops.size
-        ops += ContentProviderOperation.newInsert(Events.CONTENT_URI).withValues(values(draft)).build()
+        ops += ContentProviderOperation.newInsert(Events.CONTENT_URI)
+            .withValues(values(draft).apply { exdate?.let { put(Events.EXDATE, it) } })
+            .build()
         addReminders(ops, draft.reminders) { it.withValueBackReference(Reminders.EVENT_ID, at) }
     }
 

@@ -144,7 +144,13 @@ class CalendarViewModel(
         }
     }
 
+    /** True while a save or delete runs; a second tap would insert a duplicate. */
+    var writing by mutableStateOf(false)
+        private set
+
     private fun launchWrite(onError: (Throwable) -> Unit, block: suspend () -> Unit) {
+        if (writing) return
+        writing = true
         viewModelScope.launch {
             try {
                 block()
@@ -152,6 +158,8 @@ class CalendarViewModel(
                 throw e
             } catch (e: Exception) {
                 onError(e)
+            } finally {
+                writing = false
             }
         }
     }

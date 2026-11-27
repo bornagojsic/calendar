@@ -226,7 +226,7 @@ private fun CalendarScreen() {
         )
     }
     vm.editor?.let {
-        EventEditor(it, calendars.orEmpty(), vm::update, onSave = { s -> vm.save(s, onError) }, onClose = vm::closeEditor)
+        EventEditor(it, calendars.orEmpty(), vm.writing, vm::update, onSave = { s -> vm.save(s, onError) }, onClose = vm::closeEditor)
     }
 }
 

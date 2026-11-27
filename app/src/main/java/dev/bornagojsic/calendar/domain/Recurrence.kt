@@ -32,6 +32,8 @@ data class Rule(
     val days: Set<DayOfWeek> = emptySet(),
     val until: LocalDate? = null,
     val count: Int? = null,
+    /** Week start; changes which weeks INTERVAL>1 counts, so it's kept as read. */
+    val wkst: String? = null,
 ) {
     /** RRULE text. UNTIL must match DTSTART's type: a date for all-day events, else the end of that day in [zone] as UTC. */
     fun format(zone: ZoneId, allDay: Boolean): String = buildList {
@@ -42,6 +44,7 @@ data class Rule(
             add("UNTIL=" + if (allDay) it.format(DATE) else it.atTime(23, 59, 59).atZone(zone).withZoneSameInstant(ZoneOffset.UTC).format(UTC_TIME))
         }
         count?.let { add("COUNT=$it") }
+        wkst?.let { add("WKST=$it") }
     }.joinToString(";")
 
     /** "Every 2 weeks on Monday, Wednesday; until 3 Mar 2027". [start] supplies the implied day for monthly/yearly. */
@@ -96,6 +99,7 @@ data class Rule(
                 days = days,
                 until = until,
                 count = parts["COUNT"]?.toIntOrNull(),
+                wkst = parts["WKST"],
             )
         }
 
@@ -136,4 +140,13 @@ fun shiftExdate(exdate: String, by: Duration): String = exdate.split(',').joinTo
         it.length == 8 -> runCatching { LocalDate.parse(it, DATE).plusDays(by.toDays()).format(DATE) }.getOrDefault(it)
         else -> it
     }
+}
+
+fun dayCode(day: DayOfWeek): String = CODES.entries.first { it.value == day }.key
+
+/** The entries of [exdate] at or after the occurrence at [at] (same-form values compare as text); null if none. */
+fun exdatesFrom(exdate: String?, at: Instant, allDay: Boolean): String? {
+    val from = exdate(at, allDay)
+    return exdate?.split(',')?.filter { it.isNotBlank() && (it.length != from.length || it >= from) }
+        ?.joinToString(",")?.ifEmpty { null }
 }

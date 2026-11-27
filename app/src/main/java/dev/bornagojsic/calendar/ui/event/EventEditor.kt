@@ -97,6 +97,7 @@ private enum class Dialog { START_DATE, START_TIME, END_DATE, END_TIME, ZONE, RE
 fun EventEditor(
     editor: Editor,
     calendars: List<CalendarInfo>,
+    writing: Boolean,
     onChange: (Draft) -> Unit,
     onSave: (Scope) -> Unit,
     onClose: () -> Unit,
@@ -121,7 +122,7 @@ fun EventEditor(
                 navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Discard") } },
                 actions = {
                     TextButton(
-                        enabled = d.valid,
+                        enabled = d.valid && !writing,
                         onClick = { if (source?.recurring == true) dialog = Dialog.SCOPE else onSave(Scope.ALL) },
                     ) { Text("Save") }
                 },

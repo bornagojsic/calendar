@@ -65,6 +65,37 @@ class RecurrenceTest {
     }
 
     @Test
+    fun keepsWhatTheEditorDoesntTouch() {
+        val wk = "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,SU;WKST=SU"
+        assertEquals(wk, Rule.parse(wk, zone)!!.format(zone, false))
+        val d = Draft(
+            1, start = LocalDateTime.of(2026, 11, 27, 10, 0), end = LocalDateTime.of(2026, 11, 27, 11, 0), zone = zone,
+            rrule = "FREQ=DAILY;UNTIL=20261129T090000Z",
+        )
+        // A zone change keeps an exact UNTIL; only an all-day switch rewrites it.
+        assertEquals(d.rrule, d.reshape(zone = ZoneId.of("UTC")).rrule)
+        assertEquals("FREQ=DAILY;UNTIL=20261129", d.reshape(allDay = true).rrule)
+        assertEquals(
+            "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261229T090000Z",
+            d.copy(rrule = "FREQ=WEEKLY;BYDAY=FR;UNTIL=20261229T090000Z").moveStart(LocalDateTime.of(2026, 11, 30, 10, 0)).rrule,
+        )
+    }
+
+    @Test
+    fun keepsLaterExdates() {
+        val at = Instant.parse("2026-12-08T17:00:00Z")
+        assertEquals("20261208T170000Z,20261222T170000Z", exdatesFrom("20261201T170000Z,20261208T170000Z,20261222T170000Z", at, false))
+        assertNull(exdatesFrom("20261201T170000Z", at, false))
+    }
+
+    @Test
+    fun dstGapStartIsInvalidWhenEndResolvesEarlier() {
+        // 02:30 doesn't exist on 29 Mar 2026 in Zagreb and resolves to 03:30, after the 03:00 end.
+        val d = Draft(1, start = LocalDateTime.of(2026, 3, 29, 2, 30), end = LocalDateTime.of(2026, 3, 29, 3, 0), zone = zone)
+        assertFalse(d.valid)
+    }
+
+    @Test
     fun draftTimes() {
         val d = Draft(1, start = LocalDateTime.of(2026, 11, 27, 10, 0), end = LocalDateTime.of(2026, 11, 27, 11, 30), zone = zone)
         assertEquals(Instant.parse("2026-11-27T09:00:00Z"), d.begin())

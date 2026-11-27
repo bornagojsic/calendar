@@ -132,8 +132,9 @@ private fun whenText(event: Event, timeFormat: DateTimeFormatter): String {
         event.allDay -> "${days.start.format(short)} – ${days.endInclusive.format(short)}"
         days.start == days.endInclusive ->
             "${days.start.format(long)} · ${event.begin.atZone(zone).format(timeFormat)} – ${event.end.atZone(zone).format(timeFormat)}"
+        // The end's own date: an event ending at midnight ends on the next day, not the last day it covers.
         else -> "${days.start.format(short)}, ${event.begin.atZone(zone).format(timeFormat)} – " +
-            "${days.endInclusive.format(short)}, ${event.end.atZone(zone).format(timeFormat)}"
+            "${event.end.atZone(zone).format(short)}, ${event.end.atZone(zone).format(timeFormat)}"
     }
 }
 

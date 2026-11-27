@@ -77,15 +77,20 @@ data class Draft(
         return copy(
             start = to,
             end = to.plus(Duration.between(start, end)),
-            rrule = if (follows) rule!!.copy(days = setOf(to.dayOfWeek)).format(zone, allDay) else rrule,
+            // Swap only the BYDAY value, so the rest of the rule (an exact UNTIL, WKST) stays as written.
+            rrule = if (follows) rrule!!.replace("BYDAY=${dayCode(start.dayOfWeek)}", "BYDAY=${dayCode(to.dayOfWeek)}") else rrule,
         )
     }
 
-    /** Switches all-day or zone; a parsed rule is rewritten since UNTIL's form depends on both. */
-    fun reshape(allDay: Boolean = this.allDay, zone: ZoneId = this.zone): Draft =
-        copy(allDay = allDay, zone = zone, rrule = rrule?.let { Rule.parse(it, this.zone)?.format(zone, allDay) ?: it })
+    /** Switches all-day or zone. Only an all-day switch rewrites the rule, since UNTIL's form depends on it. */
+    fun reshape(allDay: Boolean = this.allDay, zone: ZoneId = this.zone): Draft = copy(
+        allDay = allDay,
+        zone = zone,
+        rrule = if (allDay == this.allDay) rrule else rrule?.let { Rule.parse(it, this.zone)?.format(zone, allDay) ?: it },
+    )
 
-    val valid get() = if (allDay) !end.toLocalDate().isBefore(start.toLocalDate()) else !end.isBefore(start)
+    /** Timed drafts compare the resolved instants: a start in a DST gap moves forward when stored. */
+    val valid get() = if (allDay) !end.toLocalDate().isBefore(start.toLocalDate()) else !endInstant().isBefore(begin())
 
     companion object {
         fun of(src: Source): Draft {
