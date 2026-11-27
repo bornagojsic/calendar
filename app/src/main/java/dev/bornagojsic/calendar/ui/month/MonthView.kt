@@ -118,7 +118,8 @@ private fun MonthPage(month: YearMonth, first: LocalDate, events: List<Event>, o
                             "+$hidden",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.offset(x = width * c, y = DAY_NUMBER_HEIGHT + pitch * shown).padding(start = 6.dp),
+                            // Pulled up into the row when it is too short for any chip, so the count stays visible.
+                            modifier = Modifier.offset(x = width * c, y = minOf(DAY_NUMBER_HEIGHT + pitch * shown, maxHeight - pitch).coerceAtLeast(0.dp)).padding(start = 6.dp),
                         )
                     }
                 }
