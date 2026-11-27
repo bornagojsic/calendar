@@ -271,13 +271,13 @@ class CalendarRepository(private val resolver: ContentResolver) {
                         remove(Events.EVENT_COLOR_KEY)
                     })
                     .build()
-                draft.colorKey?.let { key ->
-                    ops += ContentProviderOperation.newUpdate(Events.CONTENT_URI)
-                        .withSelection("${Events._ID} = ?", arrayOf(""))
-                        .withSelectionBackReference(0, at)
-                        .withValue(Events.EVENT_COLOR_KEY, key)
-                        .build()
-                }
+                // Always: the provider copies the master's key into the exception, and "Calendar color" must clear it.
+                ops += ContentProviderOperation.newUpdate(Events.CONTENT_URI)
+                    .withSelection("${Events._ID} = ?", arrayOf(""))
+                    .withSelectionBackReference(0, at)
+                    .withValue(Events.EVENT_COLOR_KEY, draft.colorKey)
+                    .withValue(Events.EVENT_COLOR, draft.color)
+                    .build()
                 // The provider may copy the master's reminders onto the exception; replace them.
                 ops += ContentProviderOperation.newDelete(Reminders.CONTENT_URI)
                     .withSelection("${Reminders.EVENT_ID} = ? AND $ALERTS", arrayOf(""))
