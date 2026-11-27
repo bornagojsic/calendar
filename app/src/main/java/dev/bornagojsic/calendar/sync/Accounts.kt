@@ -63,15 +63,16 @@ class CalDavAccounts(private val context: Context) {
         sync(account)
     }
 
-    /** Removes the account and its calendars from the phone; the server keeps everything. */
+    /** Removes the account, then its calendars, from the phone; the server keeps everything. Throws if Android refuses. */
     suspend fun remove(account: Account) = withContext(Dispatchers.IO) {
+        ContentResolver.cancelSync(account, CalendarContract.AUTHORITY)
+        check(manager.removeAccountExplicitly(account)) { "Couldn't remove ${account.name}" }
         val uri = Calendars.CONTENT_URI.buildUpon()
             .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
             .appendQueryParameter(Calendars.ACCOUNT_NAME, account.name)
             .appendQueryParameter(Calendars.ACCOUNT_TYPE, account.type)
             .build()
         context.contentResolver.delete(uri, "${Calendars.ACCOUNT_NAME} = ? AND ${Calendars.ACCOUNT_TYPE} = ?", arrayOf(account.name, account.type))
-        manager.removeAccountExplicitly(account)
     }
 
     fun setSyncMinutes(minutes: Int) = mine().forEach {

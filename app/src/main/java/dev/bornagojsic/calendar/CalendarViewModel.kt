@@ -102,10 +102,16 @@ class CalendarViewModel(
     val accounts = caldav.accounts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Adds a CalDAV account; [onResult] gets null on success, else a message for the user. */
-    fun addAccount(url: String, user: String, password: String, onResult: (String?) -> Unit) {
+    fun addAccount(url: String, user: String, password: String, onResult: (String?) -> Unit) =
+        accountOp(onResult) { caldav.add(url, user, password, prefs.value?.syncMinutes ?: Prefs().syncMinutes) }
+
+    /** Removes a CalDAV account; [onResult] gets null on success, else a message for the user. */
+    fun removeAccount(account: Account, onResult: (String?) -> Unit) = accountOp(onResult) { caldav.remove(account) }
+
+    private fun accountOp(onResult: (String?) -> Unit, op: suspend () -> Unit) {
         viewModelScope.launch {
             try {
-                caldav.add(url, user, password, prefs.value?.syncMinutes ?: Prefs().syncMinutes)
+                op()
                 onResult(null)
             } catch (e: CancellationException) {
                 throw e
@@ -113,10 +119,6 @@ class CalendarViewModel(
                 onResult(e.message ?: e.javaClass.simpleName)
             }
         }
-    }
-
-    fun removeAccount(account: Account) {
-        viewModelScope.launch { caldav.remove(account) }
     }
 
     /** True while a pull-to-refresh sync runs. */

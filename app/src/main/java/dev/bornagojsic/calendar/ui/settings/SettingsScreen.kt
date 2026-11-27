@@ -59,7 +59,7 @@ fun SettingsScreen(
     onSyncMinutes: (Int) -> Unit,
     accounts: List<Account>,
     onAddAccount: (url: String, user: String, password: String, onResult: (String?) -> Unit) -> Unit,
-    onRemoveAccount: (Account) -> Unit,
+    onRemoveAccount: (Account, (String?) -> Unit) -> Unit,
     onClose: () -> Unit,
 ) {
     BackHandler(onBack = onClose)
@@ -117,7 +117,7 @@ private fun Title(text: String) = Text(
 private fun Accounts(
     accounts: List<Account>,
     onAdd: (String, String, String, (String?) -> Unit) -> Unit,
-    onRemove: (Account) -> Unit,
+    onRemove: (Account, (String?) -> Unit) -> Unit,
 ) {
     var adding by rememberSaveable { mutableStateOf(false) }
     var removing by remember { mutableStateOf<Account?>(null) }
@@ -137,16 +137,23 @@ private fun Accounts(
     }
     if (adding) AddAccountDialog(onAdd, onDismiss = { adding = false })
     removing?.let { account ->
+        var busy by remember(account) { mutableStateOf(false) }
+        var error by remember(account) { mutableStateOf<String?>(null) }
         AlertDialog(
-            onDismissRequest = { removing = null },
+            onDismissRequest = { if (!busy) removing = null },
             title = { Text("Remove ${account.name}?") },
+            text = error?.let { { Text(it, color = MaterialTheme.colorScheme.error) } },
             confirmButton = {
-                TextButton(onClick = {
-                    onRemove(account)
-                    removing = null
+                TextButton(enabled = !busy, onClick = {
+                    busy = true
+                    error = null
+                    onRemove(account) { e ->
+                        busy = false
+                        if (e == null) removing = null else error = e
+                    }
                 }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { removing = null }, enabled = !busy) { Text("Cancel") } },
         )
     }
 }
