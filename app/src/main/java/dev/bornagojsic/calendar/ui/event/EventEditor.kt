@@ -193,7 +193,8 @@ fun EventEditor(
                 label = { if (it == options.size) "Custom…" else options[it]?.describe(start) ?: "Does not repeat" },
                 onPick = {
                     if (it == options.size) dialog = Dialog.CUSTOM
-                    else onChange(d.copy(rrule = options[it]?.format(d.zone, d.allDay)))
+                    // Re-picking the current rule keeps it as written (an exact UNTIL, say).
+                    else if (rule == null || options[it] != rule) onChange(d.copy(rrule = options[it]?.format(d.zone, d.allDay)))
                 },
                 onDismiss = ::dismiss,
             )

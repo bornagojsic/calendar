@@ -134,7 +134,8 @@ class CalendarViewModel(
         val e = editor ?: return
         launchWrite(onError) {
             repo.save(e.draft, e.source, scope)
-            editor = null
+            // Only the editor that was saved: the user may have closed it and opened another meanwhile.
+            if (editor === e) editor = null
         }
     }
 
