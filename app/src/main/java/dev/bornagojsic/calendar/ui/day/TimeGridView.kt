@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -128,8 +129,11 @@ private fun TimeGridPage(days: List<LocalDate>, events: List<Event>, hourHeight:
             days.forEach { day ->
                 Column(Modifier.weight(1f).padding(horizontal = 1.dp, vertical = 4.dp)) {
                     DayLabel(day, day == today)
-                    events.filter { it.allDay && day in it.days(zone) }.forEach {
-                        EventChip(it, Modifier.padding(top = 2.dp))
+                    // Capped so a pile of all-day events can't squeeze out the time grid.
+                    Column(Modifier.heightIn(max = 96.dp).verticalScroll(rememberScrollState())) {
+                        events.filter { it.allDay && day in it.days(zone) }.forEach {
+                            EventChip(it, Modifier.padding(top = 2.dp))
+                        }
                     }
                 }
             }

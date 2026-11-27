@@ -52,10 +52,10 @@ private const val MAX_YEARS = 10L
 fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader) {
     var from by rememberSaveable { mutableLongStateOf(date.minusDays(PAST_DAYS).toEpochDay()) }
     var to by rememberSaveable { mutableLongStateOf(date.plusDays(FUTURE_DAYS).toEpochDay()) }
-    // Kept across window changes so the list doesn't blank out while a wider range loads.
-    var events by remember { mutableStateOf<List<Event>?>(null) }
+    // The last loaded window and its events. Kept across window changes so the list doesn't blank out while a wider range loads.
+    var loaded by remember { mutableStateOf<Pair<LongRange, List<Event>>?>(null) }
     LaunchedEffect(from, to) {
-        load(LocalDate.ofEpochDay(from), LocalDate.ofEpochDay(to)).collect { events = it }
+        load(LocalDate.ofEpochDay(from), LocalDate.ofEpochDay(to)).collect { loaded = (from..to) to it }
     }
     // A date outside the window (month picker) recenters it.
     LaunchedEffect(date) {
@@ -64,10 +64,12 @@ fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader
             to = date.plusDays(FUTURE_DAYS).toEpochDay()
         }
     }
-    val loaded = events ?: return
+    val (window, events) = loaded ?: return
     val zone = ZoneId.systemDefault()
     val today = LocalDate.now()
-    val days = remember(loaded, from, to, today) { groupByDay(loaded, zone, LocalDate.ofEpochDay(from), LocalDate.ofEpochDay(to), today) }
+    val days = remember(window, events, today) {
+        groupByDay(events, zone, LocalDate.ofEpochDay(window.first), LocalDate.ofEpochDay(window.last), today)
+    }
 
     // Row i stands for every date in (days[i-1], days[i]], so empty dates map to the next day with events.
     fun indexOf(d: LocalDate) = days.indexOfFirst { it.first >= d }.let { if (it < 0) days.lastIndex else it }
@@ -82,7 +84,8 @@ fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader
         val i = topIndex() ?: return@LaunchedEffect
         if (!covers(i, date)) list.scrollToItem(indexOf(date))
     }
-    LaunchedEffect(list, days) {
+    // Keyed on the window too: a grown window that adds no rows must still allow the next growth.
+    LaunchedEffect(list, days, window) {
         var grown = false
         snapshotFlow { list.layoutInfo.visibleItemsInfo.map { it.key } }.collect {
             val i = topIndex() ?: return@collect
