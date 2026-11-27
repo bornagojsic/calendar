@@ -1,5 +1,6 @@
 package dev.bornagojsic.calendar.sync
 
+import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Events
 import dev.bornagojsic.calendar.domain.exdate
 import net.fortuna.ical4j.data.CalendarBuilder
@@ -11,7 +12,10 @@ import net.fortuna.ical4j.model.Property
 import net.fortuna.ical4j.model.TimeZoneRegistryFactory
 import net.fortuna.ical4j.model.component.VAlarm
 import net.fortuna.ical4j.model.component.VEvent
+import net.fortuna.ical4j.model.parameter.Cn
+import net.fortuna.ical4j.model.parameter.PartStat
 import net.fortuna.ical4j.model.parameter.Related
+import net.fortuna.ical4j.model.parameter.Role
 import net.fortuna.ical4j.model.parameter.TzId
 import net.fortuna.ical4j.model.parameter.Value
 import net.fortuna.ical4j.model.property.Action
@@ -21,6 +25,7 @@ import net.fortuna.ical4j.model.property.DtEnd
 import net.fortuna.ical4j.model.property.DtStamp
 import net.fortuna.ical4j.model.property.DtStart
 import net.fortuna.ical4j.model.property.ExDate
+import net.fortuna.ical4j.model.property.ExRule
 import net.fortuna.ical4j.model.property.Location
 import net.fortuna.ical4j.model.property.ProdId
 import net.fortuna.ical4j.model.property.RDate
@@ -44,8 +49,15 @@ import java.time.temporal.Temporal
 import java.time.temporal.TemporalAmount
 import kotlin.jvm.optionals.getOrNull
 
-/** One provider Events row (keyed by `Events` column names) and its alert reminders in minutes. */
-data class EventRow(val values: Map<String, Any?>, val reminders: List<Int> = emptyList()) {
+/**
+ * One provider Events row (keyed by `Events` column names), its alert reminders in minutes and its Attendees rows
+ * (keyed by `Attendees` column names; read from downloads only, uploads keep the stored resource's).
+ */
+data class EventRow(
+    val values: Map<String, Any?>,
+    val reminders: List<Int> = emptyList(),
+    val attendees: List<Map<String, Any?>> = emptyList(),
+) {
     operator fun get(column: String): Any? = values[column]
     fun long(column: String) = (values[column] as? Number)?.toLong()
     fun string(column: String) = values[column]?.toString()
@@ -89,6 +101,7 @@ private fun row(e: VEvent, floating: ZoneId, master: Boolean): EventRow {
             ?.let { runCatching { instant(start.plus(it), floating) }.getOrElse { _ -> begin.plus(Duration.from(it)) } }
         ?: if (allDay) begin.plus(Duration.ofDays(1)) else begin
     val rrule = e.text(Property.RRULE).takeIf { master }
+    val exrule = e.text(Property.EXRULE).takeIf { master }
     val rdate = dates(e.getProperties(Property.RDATE), floating, allDay).takeIf { master }
     val recurring = rrule != null || rdate != null
     val reminders = e.alarms.mapNotNull { minutes(it) }.distinct().sorted()
@@ -102,6 +115,7 @@ private fun row(e: VEvent, floating: ZoneId, master: Boolean): EventRow {
             Events.ALL_DAY to if (allDay) 1 else 0,
             Events.EVENT_TIMEZONE to if (allDay) "UTC" else zoneOf(e.dtStart!!, floating),
             Events.RRULE to rrule,
+            Events.EXRULE to exrule,
             Events.RDATE to rdate,
             Events.EXDATE to dates(e.getProperties(Property.EXDATE), floating, allDay).takeIf { recurring },
             // Recurring rows take DURATION instead of DTEND.
@@ -118,8 +132,32 @@ private fun row(e: VEvent, floating: ZoneId, master: Boolean): EventRow {
             Events.HAS_ALARM to if (reminders.isEmpty()) 0 else 1,
         ),
         reminders,
+        attendees(e),
     )
 }
+
+/** ORGANIZER and ATTENDEEs as Attendees rows, so the provider's search finds them. */
+private fun attendees(e: VEvent): List<Map<String, Any?>> =
+    (e.getProperties<Property>(Property.ORGANIZER) + e.getProperties<Property>(Property.ATTENDEE)).map { p ->
+        val organizer = p.name == Property.ORGANIZER
+        mapOf(
+            Attendees.ATTENDEE_NAME to p.getParameter<Cn>(Parameter.CN).getOrNull()?.value,
+            Attendees.ATTENDEE_EMAIL to p.value?.replace(Regex("^mailto:", RegexOption.IGNORE_CASE), ""),
+            Attendees.ATTENDEE_RELATIONSHIP to if (organizer) Attendees.RELATIONSHIP_ORGANIZER else Attendees.RELATIONSHIP_ATTENDEE,
+            Attendees.ATTENDEE_TYPE to when (p.getParameter<Role>(Parameter.ROLE).getOrNull()?.value) {
+                Role.OPT_PARTICIPANT.value -> Attendees.TYPE_OPTIONAL
+                Role.NON_PARTICIPANT.value -> Attendees.TYPE_NONE
+                else -> Attendees.TYPE_REQUIRED
+            },
+            Attendees.ATTENDEE_STATUS to when (p.getParameter<PartStat>(Parameter.PARTSTAT).getOrNull()?.value) {
+                PartStat.ACCEPTED.value -> Attendees.ATTENDEE_STATUS_ACCEPTED
+                PartStat.DECLINED.value -> Attendees.ATTENDEE_STATUS_DECLINED
+                PartStat.TENTATIVE.value -> Attendees.ATTENDEE_STATUS_TENTATIVE
+                PartStat.NEEDS_ACTION.value -> Attendees.ATTENDEE_STATUS_INVITED
+                else -> Attendees.ATTENDEE_STATUS_NONE
+            },
+        )
+    }
 
 /** Minutes before the start, for an alarm relative to the start; other alarms aren't kept. */
 private fun minutes(alarm: VAlarm): Int? {
@@ -186,6 +224,7 @@ fun toICal(master: EventRow, exceptions: List<EventRow>, stored: String?): Strin
         if (dtend != null) e.add<VEvent>(DtEnd(temporal(dtend, allDay, zone)))
         else if (duration != null) e.add<VEvent>(net.fortuna.ical4j.model.property.Duration(amount(duration)))
         row.string(Events.RRULE)?.let { e.add<VEvent>(RRule<Temporal>(it)) }
+        row.string(Events.EXRULE)?.let { e.add<VEvent>(ExRule<Temporal>(ParameterList(), it)) }
         row.string(Events.RDATE)?.let { e.add<VEvent>(RDate<Temporal>(dateParams(allDay), utcDates(it))) }
         // Cancelled exceptions become EXDATEs on the master, which every client understands.
         val cancelled = exceptions.filter { it.long(Events.STATUS) == Events.STATUS_CANCELED.toLong() }

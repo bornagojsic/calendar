@@ -8,6 +8,7 @@ import android.content.ContentValues
 import android.content.OperationApplicationException
 import android.net.Uri
 import android.provider.CalendarContract
+import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Calendars
 import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Reminders
@@ -111,7 +112,7 @@ private const val DEFAULT_COLOR = 0xFF346BF1.toInt()
 /** Event columns read for upload; the iCal mapping uses the same names. */
 private val EVENT_COLUMNS = arrayOf(
     Events._ID, Events.UID_2445, Events.TITLE, Events.EVENT_LOCATION, Events.DESCRIPTION, Events.DTSTART, Events.DTEND,
-    Events.DURATION, Events.ALL_DAY, Events.EVENT_TIMEZONE, Events.RRULE, Events.RDATE, Events.EXDATE, Events.STATUS,
+    Events.DURATION, Events.ALL_DAY, Events.EVENT_TIMEZONE, Events.RRULE, Events.EXRULE, Events.RDATE, Events.EXDATE, Events.STATUS,
     Events.ORIGINAL_INSTANCE_TIME, Events.DELETED, Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2,
 )
 
@@ -131,6 +132,7 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
     private val calendarsUri = Calendars.CONTENT_URI.asSyncAdapter()
     private val eventsUri = Events.CONTENT_URI.asSyncAdapter()
     private val remindersUri = Reminders.CONTENT_URI.asSyncAdapter()
+    private val attendeesUri = Attendees.CONTENT_URI.asSyncAdapter()
 
     suspend fun run(home: Url) {
         val remote = remoteCalendars(client, home)
@@ -183,13 +185,18 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
             "${Events.CALENDAR_ID} = ? AND ${Events.ORIGINAL_ID} IS NULL AND ${Events._SYNC_ID} IS NOT NULL", arrayOf("$calendarId"), null,
         )?.use { c -> buildMap { while (c.moveToNext()) put(c.getString(1), c.getLong(0) to c.getString(2)) } }.orEmpty()
         local.filterKeys { it !in remote }.values.forEach { deleteSeries(it.first) }
-        remote.filter { (name, etag) -> etag == null || local[name]?.second != etag }.keys.chunked(50).forEach { names ->
+        // Names not downloaded yet; any left over keep the old ctag, so the next sync fetches them again.
+        val missing = remote.filter { (name, etag) -> etag == null || local[name]?.second != etag }.keys.toMutableSet()
+        missing.toList().chunked(50).forEach { names ->
             dav.multiget(names.map { member(url, it) }).responses().collect { r ->
                 val ics = r[CalendarData::class.java]?.iCalendar
-                if (r.isSuccess() && ics != null) store(calendarId, r.hrefName(), r[GetETag::class.java]?.eTag, ics)
+                if (r.isSuccess() && ics != null) {
+                    store(calendarId, r.hrefName(), r[GetETag::class.java]?.eTag, ics)
+                    missing -= r.hrefName()
+                }
             }
         }
-        provider.update(
+        if (missing.isEmpty()) provider.update(
             ContentUris.withAppendedId(calendarsUri, calendarId), ContentValues().apply { put(Calendars.CAL_SYNC1, newCtag) }, null, null,
         )
     }
@@ -301,11 +308,14 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
         val values = (master.values + mapOf(
             Events.CALENDAR_ID to calendarId, Events._SYNC_ID to name, Events.SYNC_DATA1 to etag, Events.SYNC_DATA2 to ics, Events.DIRTY to 0,
         )).toValues()
-        fun reminders(row: EventRow, ref: (ContentProviderOperation.Builder) -> ContentProviderOperation.Builder) = row.reminders.forEach {
-            ops += ref(ContentProviderOperation.newInsert(remindersUri))
-                .withValue(Reminders.MINUTES, it)
-                .withValue(Reminders.METHOD, Reminders.METHOD_ALERT)
-                .build()
+        fun reminders(row: EventRow, ref: (ContentProviderOperation.Builder) -> ContentProviderOperation.Builder) {
+            row.reminders.forEach {
+                ops += ref(ContentProviderOperation.newInsert(remindersUri))
+                    .withValue(Reminders.MINUTES, it)
+                    .withValue(Reminders.METHOD, Reminders.METHOD_ALERT)
+                    .build()
+            }
+            row.attendees.forEach { ops += ref(ContentProviderOperation.newInsert(attendeesUri)).withValues(it.toValues()).build() }
         }
         val masterRef: (ContentProviderOperation.Builder, String) -> ContentProviderOperation.Builder
         if (existing != null) {
@@ -313,10 +323,12 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
                 .withSelection("(${Events._ID} = ? OR ${Events.ORIGINAL_ID} = ?) AND ${Events.DIRTY} != 0", arrayOf("$existing", "$existing"))
                 .withExpectedCount(0)
                 .build()
-            // The provider unboxes STATUS on update and throws on null (seen on API 36).
-            if (master[Events.STATUS] == null) values.remove(Events.STATUS)
+            // The provider unboxes STATUS on update and throws on null (seen on API 36); a non-cancelled value
+            // replaces a CANCELLED one left from before.
+            if (master[Events.STATUS] == null) values.put(Events.STATUS, Events.STATUS_CONFIRMED)
             ops += ContentProviderOperation.newUpdate(ContentUris.withAppendedId(eventsUri, existing)).withValues(values).build()
             ops += ContentProviderOperation.newDelete(remindersUri).withSelection("${Reminders.EVENT_ID} = ?", arrayOf("$existing")).build()
+            ops += ContentProviderOperation.newDelete(attendeesUri).withSelection("${Attendees.EVENT_ID} = ?", arrayOf("$existing")).build()
             ops += ContentProviderOperation.newDelete(eventsUri).withSelection("${Events.ORIGINAL_ID} = ?", arrayOf("$existing")).build()
             masterRef = { b, column -> b.withValue(column, existing) }
         } else {
@@ -324,7 +336,7 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
             ops += ContentProviderOperation.newInsert(eventsUri).withValues(values).build()
             masterRef = { b, column -> b.withValueBackReference(column, at) }
         }
-        reminders(master) { masterRef(it, Reminders.EVENT_ID) }
+        reminders(master) { masterRef(it, Reminders.EVENT_ID) } // Attendees.EVENT_ID is the same "event_id" column
         rows.drop(1).forEach { row ->
             val at = ops.size
             ops += masterRef(ContentProviderOperation.newInsert(eventsUri), Events.ORIGINAL_ID)

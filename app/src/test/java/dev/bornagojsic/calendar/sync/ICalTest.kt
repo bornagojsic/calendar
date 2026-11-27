@@ -1,5 +1,6 @@
 package dev.bornagojsic.calendar.sync
 
+import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Events
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -59,6 +60,8 @@ class ICalTest {
         assertEquals("P1800S", master[Events.DURATION])
         assertEquals("20261116T080000Z", master[Events.EXDATE])
         assertEquals(listOf(10), master.reminders)
+        assertEquals("Ana", master.attendees.single()[Attendees.ATTENDEE_NAME])
+        assertEquals("ana@example.com", master.attendees.single()[Attendees.ATTENDEE_EMAIL])
 
         assertEquals("Standup (moved)", exception[Events.TITLE])
         assertEquals(millis(2026, 11, 9, 9), exception[Events.ORIGINAL_INSTANCE_TIME])
@@ -111,5 +114,13 @@ class ICalTest {
         assertEquals(1798070400000L, row[Events.DTSTART]) // 2026-12-24T00:00Z
         assertEquals(1798070400000L + 3 * 86_400_000L, row[Events.DTEND])
         assertTrue(toICal(row, emptyList(), null).contains("DTSTART;VALUE=DATE:20261224"))
+    }
+
+    @Test
+    fun exruleRoundTrips() {
+        val ics = series.replace("RRULE:FREQ=WEEKLY;BYDAY=MO\r\n", "RRULE:FREQ=WEEKLY;BYDAY=MO\r\nEXRULE:FREQ=MONTHLY;BYDAY=1MO\r\n")
+        val master = parseEvents(ics).first()
+        assertEquals("FREQ=MONTHLY;BYDAY=1MO", master[Events.EXRULE])
+        assertEquals("FREQ=MONTHLY;BYDAY=1MO", parseEvents(toICal(master, emptyList(), ics)).first()[Events.EXRULE])
     }
 }
