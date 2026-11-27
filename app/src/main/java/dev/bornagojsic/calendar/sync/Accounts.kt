@@ -115,7 +115,9 @@ class SyncAdapter(context: Context) : AbstractThreadedSyncAdapter(context, false
         val home = manager.getUserData(account, KEY_HOME) ?: return
         try {
             davClient(manager.getUserData(account, KEY_USER), manager.getPassword(account), Url(home)).use { client ->
-                runBlocking { CalDavSync(account, provider, client).run(Url(home)) }
+                val sync = CalDavSync(account, provider, client)
+                runBlocking { sync.run(Url(home)) }
+                result.stats.numIoExceptions += sync.failedUploads
             }
         } catch (_: UnauthorizedException) {
             result.stats.numAuthExceptions++

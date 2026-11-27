@@ -59,6 +59,9 @@ import java.util.UUID
 /** A VEVENT calendar collection on the server. */
 data class RemoteCalendar(val url: Url, val name: String, val color: Int?, val writable: Boolean)
 
+/** A request to a host other than the account's server, refused so the login isn't sent there. */
+class OriginRefusedException(message: String) : DavException(message)
+
 /** True if [a] and [b] have the same scheme, host and port. */
 fun sameOrigin(a: Url, b: Url) = a.protocol == b.protocol && a.host.equals(b.host, ignoreCase = true) && a.port == b.port
 
@@ -72,7 +75,7 @@ fun davClient(user: String, password: String, origin: Url) = HttpClient(OkHttp) 
     install(createClientPlugin("SameOrigin") {
         onRequest { request, _ ->
             val url = request.url.build()
-            if (!sameOrigin(url, origin)) throw DavException("Refused to send the login to ${url.protocol.name}://${url.hostWithPort}")
+            if (!sameOrigin(url, origin)) throw OriginRefusedException("Refused to send the login to ${url.protocol.name}://${url.hostWithPort}")
         }
     })
 }
@@ -141,6 +144,10 @@ private val EVENT_COLUMNS = arrayOf(
  * last seen in `SYNC_DATA2`. Local changes are pushed first; on conflict the server wins.
  */
 class CalDavSync(private val account: Account, private val provider: ContentProviderClient, private val client: HttpClient) {
+
+    /** Series whose upload failed in this run; they stay dirty and go up on the next sync. */
+    var failedUploads = 0
+        private set
 
     private fun Uri.asSyncAdapter(): Uri = buildUpon()
         .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
@@ -231,7 +238,19 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
             eventsUri, arrayOf(Events._ID, Events.ORIGINAL_ID),
             "${Events.CALENDAR_ID} = ? AND (${Events.DIRTY} != 0 OR ${Events.DELETED} = 1)", arrayOf("$calendarId"), null,
         )?.use { c -> buildSet { while (c.moveToNext()) add(if (c.isNull(1)) c.getLong(0) else c.getLong(1)) } }.orEmpty()
-        series.forEach { pushSeries(calendarId, url, it) }
+        series.forEach {
+            try {
+                pushSeries(calendarId, url, it)
+            } catch (e: UnauthorizedException) {
+                throw e
+            } catch (e: OriginRefusedException) {
+                throw e
+            } catch (e: Exception) {
+                // One bad series shouldn't hold back the others or the pull; it stays dirty for the next sync.
+                android.util.Log.w("CalDavSync", "Upload of event $it failed", e)
+                failedUploads++
+            }
+        }
         return series.isNotEmpty()
     }
 
