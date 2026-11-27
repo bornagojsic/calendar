@@ -246,6 +246,8 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
         } catch (_: PreconditionFailedException) {
             // Server wins: replace the local change with the server's copy, or drop it if the server deleted it.
             download(calendarId, url, file, id)
+            // A new row has no _SYNC_ID, so store() added the server copy as another row; drop the local one.
+            if (name == null) deleteSeries(id)
             return
         }
         val ops = arrayListOf(
