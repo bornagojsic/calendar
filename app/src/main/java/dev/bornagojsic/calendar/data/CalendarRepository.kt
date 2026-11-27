@@ -30,7 +30,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 
 data class CalendarInfo(
     val id: Long,
@@ -40,6 +42,9 @@ data class CalendarInfo(
     val visible: Boolean,
     val writable: Boolean,
 )
+
+/** The reminders the editor shows and rewrites; email and other methods are left alone. */
+private val ALERTS = "${Reminders.METHOD} IN (${Reminders.METHOD_DEFAULT}, ${Reminders.METHOD_ALERT})"
 
 /** Which occurrences of a recurring event an edit or delete applies to. */
 enum class Scope(val label: String) { THIS("This event"), FOLLOWING("This and following events"), ALL("All events") }
@@ -155,6 +160,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
             Events._SYNC_ID,
             Events.EXDATE,
             Events.DURATION,
+            Events.RDATE,
         )
         val details = resolver.query(eventUri(id), projection, "${Events.DELETED} = 0", null, null)?.use { c ->
             if (!c.moveToFirst()) return@use null
@@ -163,7 +169,8 @@ class CalendarRepository(private val resolver: ContentResolver) {
                 eventId = id,
                 calendarId = c.getLong(0),
                 calendarName = c.getString(1) ?: "",
-                writable = c.getInt(2) >= Calendars.CAL_ACCESS_CONTRIBUTOR,
+                // shortcut: RDATE series are read-only, since every write path here assumes one RRULE. Support when needed.
+                writable = c.getInt(2) >= Calendars.CAL_ACCESS_CONTRIBUTOR && c.isNull(15),
                 title = c.getString(3) ?: "",
                 location = c.getString(4) ?: "",
                 description = c.getString(5) ?: "",
@@ -192,7 +199,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
             ) else null
         } ?: details
         val reminders = resolver.query(
-            Reminders.CONTENT_URI, arrayOf(Reminders.MINUTES), "${Reminders.EVENT_ID} = ?", arrayOf("$id"), null,
+            Reminders.CONTENT_URI, arrayOf(Reminders.MINUTES), "${Reminders.EVENT_ID} = ? AND $ALERTS", arrayOf("$id"), null,
         )?.use { c -> buildList { while (c.moveToNext()) add(c.getInt(0)) } } ?: emptyList()
         return series.copy(reminders = reminders.distinct().sorted())
     }
@@ -236,18 +243,22 @@ class CalendarRepository(private val resolver: ContentResolver) {
             }
             // Editing the first occurrence's "following" is the whole series.
             scope == Scope.ALL || src.originalTime == d.seriesStart -> {
-                // The draft holds this occurrence's times; move the series start, and its EXDATEs, by the same amount.
-                val shift = Duration.between(src.originalTime, draft.begin())
-                update(ops, d.seriesId, draft, begin = d.seriesStart + shift, exdate = d.exdate?.let { shiftExdate(it, shift) })
+                // The draft holds this occurrence's times; move the series start, and its EXDATEs, by the same
+                // wall-clock amount, so a move across a DST change keeps the hour.
+                val zone = if (d.allDay) ZoneOffset.UTC else d.zone
+                val moved = LocalDateTime.ofInstant(d.seriesStart, zone) +
+                    Duration.between(LocalDateTime.ofInstant(src.originalTime, zone), draft.start)
+                val begin = if (draft.allDay) moved.toLocalDate().atStartOfDay(ZoneOffset.UTC).toInstant() else moved.atZone(draft.zone).toInstant()
+                update(ops, d.seriesId, draft, begin = begin, exdate = d.exdate?.let { shiftExdate(it, Duration.between(d.seriesStart, begin)) })
             }
             else -> {
                 val at = src.originalTime
                 // An unchanged COUNT counts from the series start; the new series gets what's left.
-                val rrule = draft.rrule?.let { r ->
-                    val count = Regex("COUNT=(\\d+)").find(r)?.groupValues?.get(1)?.toInt()
-                    if (count == null || r != d.rrule) r
-                    else r.replace("COUNT=$count", "COUNT=${(count - occurrencesBefore(d, at)).coerceAtLeast(1)}")
-                }
+                fun count(r: String?) = r?.let { Regex("COUNT=(\\d+)").find(it)?.groupValues?.get(1)?.toInt() }
+                val count = count(draft.rrule)
+                // Compare only COUNT: moving the start to another weekday rewrites BYDAY but not the count.
+                val rrule = if (count == null || count != count(d.rrule)) draft.rrule
+                else draft.rrule!!.replace("COUNT=$count", "COUNT=${(count - occurrencesBefore(d, at)).coerceAtLeast(1)}")
                 truncate(ops, d, at)
                 // Occurrences deleted after the split stay deleted, moved by however far this one moved.
                 val exdate = exdatesFrom(d.exdate, at, d.allDay)?.let { shiftExdate(it, Duration.between(at, draft.begin())) }
@@ -357,7 +368,7 @@ class CalendarRepository(private val resolver: ContentResolver) {
             })
             .build()
         ops += ContentProviderOperation.newDelete(Reminders.CONTENT_URI)
-            .withSelection("${Reminders.EVENT_ID} = ?", arrayOf("$id"))
+            .withSelection("${Reminders.EVENT_ID} = ? AND $ALERTS", arrayOf("$id"))
             .build()
         addReminders(ops, draft.reminders) { it.withValue(Reminders.EVENT_ID, id) }
     }

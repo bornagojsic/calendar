@@ -423,7 +423,7 @@ private fun RecurrenceDialog(initial: Rule, onDone: (Rule) -> Unit, onDismiss: (
         },
         confirmButton = {
             TextButton(enabled = ok, onClick = {
-                onDone(Rule(freq, n!!, if (freq == Freq.WEEKLY) days else emptySet(), until, c))
+                onDone(Rule(freq, n!!, if (freq == Freq.WEEKLY) days else emptySet(), until, c, wkst = initial.wkst))
                 onDismiss()
             }) { Text("Done") }
         },

@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.temporal.ChronoUnit
 import java.time.ZoneId
 
@@ -110,11 +111,7 @@ class CalendarViewModel(
     }
 
     /** The next full hour on the shown date; after 23:00 that's midnight of the following day. */
-    private fun defaultStart(): LocalDateTime {
-        val now = LocalDateTime.now()
-        val next = now.truncatedTo(ChronoUnit.HOURS).plusHours(1)
-        return date.value.atTime(next.toLocalTime()).plusDays(ChronoUnit.DAYS.between(now.toLocalDate(), next.toLocalDate()))
-    }
+    private fun defaultStart(): LocalDateTime = date.value.atTime(LocalTime.now()).truncatedTo(ChronoUnit.HOURS).plusHours(1)
 
     fun edit(source: Source) {
         _selected.value = null
