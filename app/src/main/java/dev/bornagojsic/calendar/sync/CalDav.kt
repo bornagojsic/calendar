@@ -42,6 +42,7 @@ import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.auth.Auth
 import io.ktor.client.statement.bodyAsText
 import io.ktor.content.TextContent
+import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.URLBuilder
 import io.ktor.http.Url
@@ -123,6 +124,16 @@ suspend fun remoteCalendars(client: HttpClient, home: Url): Pair<List<RemoteCale
         }
         .toList()
     return calendars to complete
+}
+
+/**
+ * The PUT precondition for a series: create-only if never [uploaded], else If-Match its [etag]. Null if the etag is
+ * unknown, so the upload must wait until the server's current etag and copy are fetched.
+ */
+fun putPrecondition(uploaded: Boolean, etag: String?): Headers? = when {
+    !uploaded -> headersOf(HttpHeaders.IfNoneMatch, "*")
+    etag != null -> headersOf(HttpHeaders.IfMatch, QuotedStringUtils.asQuotedString(etag))
+    else -> null
 }
 
 /** DIRTY value for rows being uploaded; app writes set DIRTY to 1. */
@@ -263,7 +274,19 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
         )
         val master = rows("${Events._ID} = ?", id).firstOrNull() ?: return
         val name = master.string(Events._SYNC_ID)
-        val etag = master.string(Events.SYNC_DATA1)
+        val uploaded = master.string(Events.SYNC_DATA2) != null
+        var etag = master.string(Events.SYNC_DATA1)
+        if (uploaded && name != null && etag == null) {
+            // Etag unknown (an earlier PUT returned none and the follow-up GET failed): nothing goes out unconditionally.
+            // Fetch the server's copy; if it isn't the one last seen, the server wins, as on a 412.
+            val got = fetch(url, name) ?: return deleteSeries(id)
+            if (got.second != master.string(Events.SYNC_DATA2)) {
+                // A deleted series is dropped locally; the pull then brings the server's copy back.
+                if (master.long(Events.DELETED) == 1L) deleteSeries(id) else store(calendarId, name, got.first, got.second, force = true)
+                return
+            }
+            etag = got.first ?: throw IOException("No ETag for $name")
+        }
         val ifMatch = etag?.let { headersOf(HttpHeaders.IfMatch, QuotedStringUtils.asQuotedString(it)) }
         if (master.long(Events.DELETED) == 1L) {
             if (name != null) try {
@@ -288,12 +311,20 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
             }, null, null,
         )
         val ics = toICal(master.copy(values = master.values + (Events.UID_2445 to uid)), live, master.string(Events.SYNC_DATA2))
-        val newEtag = try {
-            DavResource(client, member(url, file)).put(
-                TextContent(ics, DavCalendar.MIME_ICALENDAR_UTF8),
-                // Never uploaded successfully (no SYNC_DATA2): create only, never overwrite.
-                if (master.string(Events.SYNC_DATA2) == null) headersOf(HttpHeaders.IfNoneMatch, "*") else ifMatch,
+        val (newEtag, newIcs) = try {
+            val putEtag = DavResource(client, member(url, file)).put(
+                TextContent(ics, DavCalendar.MIME_ICALENDAR_UTF8), putPrecondition(uploaded, etag),
             ) { GetETag.fromHttpResponse(it)?.eTag }
+            // A server may omit the ETag (e.g. after rewriting the event); fetch it, with the stored copy, right away.
+            // If that fails too, SYNC_DATA1 stays null and the next push fetches it before uploading.
+            if (putEtag != null) putEtag to ics
+            else try {
+                fetch(url, file)?.takeIf { it.first != null } ?: (null to ics)
+            } catch (_: IOException) {
+                null to ics
+            } catch (_: DavException) {
+                null to ics
+            }
         } catch (_: PreconditionFailedException) {
             // Server wins: replace the local change with the server's copy, or drop it if the server deleted it.
             // The row already has _SYNC_ID = file, so store() overwrites it in place, even if it has no etag yet.
@@ -305,7 +336,7 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
                 .withValue(Events._SYNC_ID, file)
                 .withValue(Events.UID_2445, uid)
                 .withValue(Events.SYNC_DATA1, newEtag)
-                .withValue(Events.SYNC_DATA2, ics)
+                .withValue(Events.SYNC_DATA2, newIcs)
                 .build(),
         )
         live.forEach {
@@ -321,14 +352,17 @@ class CalDavSync(private val account: Account, private val provider: ContentProv
         provider.applyBatch(ops)
     }
 
-    private suspend fun download(calendarId: Long, url: Url, file: String, id: Long) {
-        val got = try {
-            DavResource(client, member(url, file)).get(headersOf(HttpHeaders.Accept, "text/calendar")) { r ->
-                GetETag.fromHttpResponse(r)?.eTag to r.bodyAsText()
-            }
-        } catch (_: NotFoundException) {
-            null
+    /** The server's etag and copy of resource [file], or null if it's gone. */
+    private suspend fun fetch(url: Url, file: String): Pair<String?, String>? = try {
+        DavResource(client, member(url, file)).get(headersOf(HttpHeaders.Accept, "text/calendar")) { r ->
+            GetETag.fromHttpResponse(r)?.eTag to r.bodyAsText()
         }
+    } catch (_: NotFoundException) {
+        null
+    }
+
+    private suspend fun download(calendarId: Long, url: Url, file: String, id: Long) {
+        val got = fetch(url, file)
         // store() overwrites the master in place (clearing DIRTY) and replaces its exceptions.
         if (got == null) deleteSeries(id) else store(calendarId, file, got.first, got.second, force = true)
     }
