@@ -120,6 +120,7 @@ Split into modules only if build times hurt.
 3. Event detail, create/edit/delete.
 4. Reminders and notifications.
 5. Polish: search, settings, app icon.
+6. v1 release: signed APKs on GitHub Releases, event color in the editor, README.
 
 ## 10. Decisions
 
@@ -128,3 +129,4 @@ Split into modules only if build times hurt.
 - **Distribution**: signed APKs attached to GitHub Releases only. A workflow builds and signs the release APK on a `v*` tag. The keystore and its passwords live in GitHub Actions secrets and are never committed.
 - **Search**: matches title, location, description and attendee names/emails (case-insensitive `LIKE` on the `Events` table). Results are listed in Schedule-view style.
 - **Reminders**: this is the only calendar app on the device (see §6).
+- **Event color**: the editor offers the account's own palette (the provider's `Colors` table, which DAVx5 fills) and stores its key, so DAVx5 can sync it. Accounts without a palette get no color row.

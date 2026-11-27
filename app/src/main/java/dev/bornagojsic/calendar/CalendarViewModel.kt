@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.bornagojsic.calendar.data.CalendarRepository
+import dev.bornagojsic.calendar.data.CalendarInfo
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -178,6 +179,8 @@ class CalendarViewModel(
 
     /** The next full hour on the shown date; after 23:00 that's midnight of the following day. */
     private fun defaultStart(): LocalDateTime = date.value.atTime(LocalTime.now()).truncatedTo(ChronoUnit.HOURS).plusHours(1)
+
+    suspend fun palette(cal: CalendarInfo) = repo.palette(cal)
 
     fun edit(source: Source) {
         _selected.value = null
