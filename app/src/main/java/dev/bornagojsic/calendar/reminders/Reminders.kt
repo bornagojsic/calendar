@@ -13,6 +13,7 @@ import android.content.Intent
 import android.os.Build
 import android.provider.CalendarContract
 import android.provider.CalendarContract.CalendarAlerts
+import android.provider.CalendarContract.Instances
 import android.text.format.DateUtils
 import dev.bornagojsic.calendar.MainActivity
 import dev.bornagojsic.calendar.R
@@ -100,8 +101,30 @@ class SnoozeReceiver : BroadcastReceiver() {
                     am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, fire)
                 }
             }
-            ACTION_SNOOZED -> notify(context, alert)
+            ACTION_SNOOZED -> {
+                val pending = goAsync()
+                thread {
+                    try {
+                        current(context, alert)?.let { notify(context, it) }
+                    } finally {
+                        pending.finish()
+                    }
+                }
+            }
         }
+    }
+}
+
+/** The occurrence as it is now, or null if it was deleted or moved since the snooze. */
+private fun current(context: Context, alert: Alert): Alert? {
+    val uri = Instances.CONTENT_URI.buildUpon().also {
+        ContentUris.appendId(it, alert.begin)
+        ContentUris.appendId(it, alert.begin)
+    }.build()
+    val projection = arrayOf(Instances.END, Instances.TITLE, Instances.ALL_DAY, Instances.EVENT_LOCATION)
+    val where = "${Instances.EVENT_ID} = ? AND ${Instances.BEGIN} = ?"
+    return context.contentResolver.query(uri, projection, where, arrayOf("${alert.eventId}", "${alert.begin}"), null)?.use { c ->
+        if (c.moveToFirst()) alert.copy(end = c.getLong(0), title = c.getString(1).orEmpty(), allDay = c.getInt(2) != 0, location = c.getString(3).orEmpty()) else null
     }
 }
 
