@@ -77,13 +77,13 @@ class CalendarViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    fun setPrefs(prefs: Prefs) {
-        viewModelScope.launch {
-            settings.edit { p ->
-                prefs.weekStart?.let { p[WEEK_START] = it.name } ?: p.remove(WEEK_START)
-                prefs.clock24?.let { p[CLOCK] = if (it) "24" else "12" } ?: p.remove(CLOCK)
-            }
-        }
+    /** One key per call, so two quick changes can't overwrite each other with a stale copy. */
+    fun setWeekStart(day: DayOfWeek?) {
+        viewModelScope.launch { settings.edit { p -> day?.let { p[WEEK_START] = it.name } ?: p.remove(WEEK_START) } }
+    }
+
+    fun setClock24(h24: Boolean?) {
+        viewModelScope.launch { settings.edit { p -> h24?.let { p[CLOCK] = if (it) "24" else "12" } ?: p.remove(CLOCK) } }
     }
 
     private val _query = MutableStateFlow<String?>(null)

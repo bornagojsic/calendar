@@ -132,7 +132,8 @@ fun SearchResults(events: List<Event>, onEvent: (Event) -> Unit) {
     if (days.isEmpty()) {
         Text("No results", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
-        DayList(days, zone, onEvent, rememberLazyListState(), PaddingValues())
+        // New results start at the top, not wherever the previous ones were scrolled to.
+        DayList(days, zone, onEvent, remember(events) { LazyListState() }, PaddingValues())
     }
 }
 

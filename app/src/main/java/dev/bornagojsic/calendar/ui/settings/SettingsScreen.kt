@@ -35,7 +35,7 @@ import java.time.format.TextStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(prefs: Prefs, onChange: (Prefs) -> Unit, onClose: () -> Unit) {
+fun SettingsScreen(prefs: Prefs, onWeekStart: (DayOfWeek?) -> Unit, onClock24: (Boolean?) -> Unit, onClose: () -> Unit) {
     BackHandler(onBack = onClose)
     val locale = LocalConfiguration.current.locales[0]
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -51,7 +51,7 @@ fun SettingsScreen(prefs: Prefs, onChange: (Prefs) -> Unit, onClose: () -> Unit)
                     listOf(null, DayOfWeek.MONDAY, DayOfWeek.SUNDAY, DayOfWeek.SATURDAY),
                     prefs.weekStart,
                     { it?.getDisplayName(TextStyle.FULL, locale) ?: "Phone default" },
-                    { onChange(prefs.copy(weekStart = it)) },
+                    onWeekStart,
                 )
                 HorizontalDivider()
                 Choice(
@@ -59,7 +59,7 @@ fun SettingsScreen(prefs: Prefs, onChange: (Prefs) -> Unit, onClose: () -> Unit)
                     listOf(null, false, true),
                     prefs.clock24,
                     { when (it) { null -> "Phone default"; false -> "12-hour"; true -> "24-hour" } },
-                    { onChange(prefs.copy(clock24 = it)) },
+                    onClock24,
                 )
             }
         }

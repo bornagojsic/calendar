@@ -274,7 +274,7 @@ private fun CalendarScreen(opening: Pair<Long, Instant>?, onOpened: () -> Unit) 
                 }
             }
         }
-        if (settingsOpen) prefs?.let { SettingsScreen(it, vm::setPrefs, onClose = { settingsOpen = false }) }
+        if (settingsOpen) prefs?.let { SettingsScreen(it, vm::setWeekStart, vm::setClock24, onClose = { settingsOpen = false }) }
         if (picking) DateDialog(date, onPick = { vm.setDate(it) }, onDismiss = { picking = false })
         selected?.let { event ->
             EventSheet(
