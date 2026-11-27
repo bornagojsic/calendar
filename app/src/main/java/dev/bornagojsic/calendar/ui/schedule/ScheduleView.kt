@@ -86,7 +86,10 @@ fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader
     fun topIndex() = (list.layoutInfo.visibleItemsInfo.firstOrNull()?.key as? Long)
         ?.let { key -> days.indexOfFirst { it.first.toEpochDay() == key } }?.takeIf { it >= 0 }
     val currentDate by rememberUpdatedState(date)
+    // Both effects below wait while `date` is outside the loaded window (a recentered window is still loading),
+    // so the old window's rows can't overwrite the picked date.
     LaunchedEffect(date, days) {
+        if (date.toEpochDay() !in window) return@LaunchedEffect
         val i = topIndex() ?: return@LaunchedEffect
         if (!covers(i, date)) list.scrollToItem(indexOf(date))
     }
@@ -95,7 +98,7 @@ fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader
         var grown = false
         snapshotFlow { list.layoutInfo.visibleItemsInfo.map { it.key } }.collect {
             val i = topIndex() ?: return@collect
-            if (!covers(i, currentDate)) onDate(days[i].first)
+            if (currentDate.toEpochDay() in window && !covers(i, currentDate)) onDate(days[i].first)
             if (grown) return@collect
             // Grow by a year near either end, up to MAX_YEARS from today, so sparse calendars still terminate.
             if (it.size >= days.size - i - 5 && to < today.plusYears(MAX_YEARS).toEpochDay()) {
@@ -110,9 +113,9 @@ fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader
     }
 
     val monthFormat = remember { DateTimeFormatter.ofPattern("LLLL yyyy") }
-    // Bottom padding of almost a screen, so even the last rows (today, a picked date) can sit at the top.
+    // A screen of bottom padding, so even the last row (today, a picked date) can sit at the top.
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = maxHeight - 120.dp)) {
+        LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = maxHeight)) {
             itemsIndexed(days, key = { _, (d, _) -> d.toEpochDay() }) { i, (day, dayEvents) ->
                 Column {
                     if (i == 0 || days[i - 1].first.month != day.month || days[i - 1].first.year != day.year) {
