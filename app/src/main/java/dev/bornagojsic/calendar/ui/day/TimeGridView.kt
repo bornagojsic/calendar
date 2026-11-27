@@ -2,6 +2,8 @@ package dev.bornagojsic.calendar.ui.day
 
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
@@ -58,6 +60,7 @@ import dev.bornagojsic.calendar.ui.rememberHourFormat
 import dev.bornagojsic.calendar.ui.rememberTimeFormat
 import kotlinx.coroutines.delay
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.TextStyle
@@ -68,7 +71,14 @@ private val GUTTER = 48.dp
 
 /** Day, 3-day and Week views: an all-day strip over a 24h grid, [days] columns per page. */
 @Composable
-fun TimeGridView(days: Int, date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader) {
+fun TimeGridView(
+    days: Int,
+    date: LocalDate,
+    onDate: (LocalDate) -> Unit,
+    load: EventLoader,
+    onEvent: (Event) -> Unit,
+    onSlot: (LocalDateTime) -> Unit,
+) {
     // Week pages start on the locale's first day; Day and 3-day pages start on the date they opened on.
     val base = LocalDate.ofEpochDay(rememberSaveable { (if (days == 7) weekStart(date) else date).toEpochDay() })
     var hourHeight by rememberSaveable { mutableFloatStateOf(48f) }
@@ -99,6 +109,8 @@ fun TimeGridView(days: Int, date: LocalDate, onDate: (LocalDate) -> Unit, load: 
             hourHeight = hourHeight.dp,
             scroll = scroll,
             now = now,
+            onEvent = onEvent,
+            onSlot = onSlot,
         )
     }
 }
@@ -120,7 +132,15 @@ private fun Modifier.pinchToZoom(onZoom: (Float) -> Unit) = this.then(
 )
 
 @Composable
-private fun TimeGridPage(days: List<LocalDate>, events: List<Event>, hourHeight: Dp, scroll: ScrollState, now: LocalTime) {
+private fun TimeGridPage(
+    days: List<LocalDate>,
+    events: List<Event>,
+    hourHeight: Dp,
+    scroll: ScrollState,
+    now: LocalTime,
+    onEvent: (Event) -> Unit,
+    onSlot: (LocalDateTime) -> Unit,
+) {
     val zone = ZoneId.systemDefault()
     val today = LocalDate.now()
     val border = MaterialTheme.colorScheme.outlineVariant
@@ -132,7 +152,7 @@ private fun TimeGridPage(days: List<LocalDate>, events: List<Event>, hourHeight:
                     // Capped so a pile of all-day events can't squeeze out the time grid.
                     Column(Modifier.heightIn(max = 96.dp).verticalScroll(rememberScrollState())) {
                         events.filter { it.allDay && day in it.days(zone) }.forEach {
-                            EventChip(it, Modifier.padding(top = 2.dp))
+                            EventChip(it, Modifier.padding(top = 2.dp).clickable { onEvent(it) })
                         }
                     }
                 }
@@ -146,6 +166,10 @@ private fun TimeGridPage(days: List<LocalDate>, events: List<Event>, hourHeight:
                     Modifier
                         .weight(1f)
                         .height(hourHeight * 24)
+                        // Tap an empty slot: new event at that hour. Event blocks consume their own taps.
+                        .pointerInput(day, hourHeight) {
+                            detectTapGestures { onSlot(day.atTime((it.y / (hourHeight.toPx())).toInt().coerceIn(0, 23), 0)) }
+                        }
                         .drawBehind {
                             drawLine(border, Offset(0f, 0f), Offset(0f, size.height), 1.dp.toPx())
                             for (h in 1 until 24) {
@@ -160,7 +184,8 @@ private fun TimeGridPage(days: List<LocalDate>, events: List<Event>, hourHeight:
                             p.event,
                             Modifier
                                 .offset(x = width * p.col, y = hourHeight * (p.startMin / 60f))
-                                .size(width, hourHeight * ((p.endMin - p.startMin) / 60f)),
+                                .size(width, hourHeight * ((p.endMin - p.startMin) / 60f))
+                                .clickable { onEvent(p.event) },
                         )
                     }
                     if (day == today) NowLine(hourHeight * (now.toSecondOfDay() / 3600f))

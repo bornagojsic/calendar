@@ -1,6 +1,8 @@
 package dev.bornagojsic.calendar.ui.schedule
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -51,7 +53,7 @@ private const val MAX_YEARS = 10L
 
 /** Endless list of days that have events, plus today and the date it opened on. The window grows by a year when you scroll near either end. */
 @Composable
-fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader) {
+fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader, onEvent: (Event) -> Unit) {
     var from by rememberSaveable { mutableLongStateOf(date.minusDays(PAST_DAYS).toEpochDay()) }
     var to by rememberSaveable { mutableLongStateOf(date.plusDays(FUTURE_DAYS).toEpochDay()) }
     // The date the window was centered on; always gets a row, like today, so the list has something to land on.
@@ -125,7 +127,7 @@ fun ScheduleView(date: LocalDate, onDate: (LocalDate) -> Unit, load: EventLoader
                             modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
                         )
                     }
-                    DayRow(day, day == today, dayEvents, zone)
+                    DayRow(day, day == today, dayEvents, zone, onEvent)
                 }
             }
         }
@@ -148,7 +150,7 @@ private fun groupByDay(events: List<Event>, zone: ZoneId, first: LocalDate, last
 }
 
 @Composable
-private fun DayRow(day: LocalDate, isToday: Boolean, events: List<Event>, zone: ZoneId) {
+private fun DayRow(day: LocalDate, isToday: Boolean, events: List<Event>, zone: ZoneId, onEvent: (Event) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
         Column(Modifier.width(48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -173,18 +175,20 @@ private fun DayRow(day: LocalDate, isToday: Boolean, events: List<Event>, zone: 
             if (events.isEmpty()) {
                 Text("No events", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            events.forEach { ScheduleEvent(it, zone) }
+            events.forEach { ScheduleEvent(it, zone, onEvent) }
         }
     }
 }
 
 @Composable
-private fun ScheduleEvent(event: Event, zone: ZoneId) {
+private fun ScheduleEvent(event: Event, zone: ZoneId, onEvent: (Event) -> Unit) {
     val format = rememberTimeFormat()
     Column(
         Modifier
             .fillMaxWidth()
-            .background(eventColor(event.color), MaterialTheme.shapes.small)
+            .clip(MaterialTheme.shapes.small)
+            .background(eventColor(event.color))
+            .clickable { onEvent(event) }
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Text(event.label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = Color.White)
