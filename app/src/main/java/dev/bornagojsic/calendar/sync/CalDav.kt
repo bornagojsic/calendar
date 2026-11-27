@@ -37,6 +37,7 @@ import at.bitfire.dav4jvm.property.webdav.GetETag
 import at.bitfire.dav4jvm.property.webdav.ResourceType
 import at.bitfire.dav4jvm.property.webdav.WebDAV
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.api.createClientPlugin
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.auth.Auth
 import io.ktor.client.statement.bodyAsText
@@ -47,6 +48,7 @@ import io.ktor.http.Url
 import io.ktor.http.appendPathSegments
 import io.ktor.http.encodedPath
 import io.ktor.http.headersOf
+import io.ktor.http.hostWithPort
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
@@ -57,10 +59,22 @@ import java.util.UUID
 /** A VEVENT calendar collection on the server. */
 data class RemoteCalendar(val url: Url, val name: String, val color: Int?, val writable: Boolean)
 
-/** dav4jvm follows redirects itself, so the client must not. */
-fun davClient(user: String, password: String) = HttpClient(OkHttp) {
+/** True if [a] and [b] have the same scheme, host and port. */
+fun sameOrigin(a: Url, b: Url) = a.protocol == b.protocol && a.host.equals(b.host, ignoreCase = true) && a.port == b.port
+
+/**
+ * dav4jvm follows redirects itself, so the client must not. It also follows them to any host, and the auth provider
+ * sends the password with every request, so requests outside [origin] are refused before they go out.
+ */
+fun davClient(user: String, password: String, origin: Url) = HttpClient(OkHttp) {
     followRedirects = false
     install(Auth) { providers += PreemptiveBasicDigestAuthProvider(user, password) }
+    install(createClientPlugin("SameOrigin") {
+        onRequest { request, _ ->
+            val url = request.url.build()
+            if (!sameOrigin(url, origin)) throw DavException("Refused to send the login to ${url.protocol.name}://${url.hostWithPort}")
+        }
+    })
 }
 
 /** The calendar home: .well-known/caldav (RFC 6764), else [base] itself → current-user-principal → calendar-home-set. */
@@ -89,9 +103,10 @@ suspend fun remoteCalendars(client: HttpClient, home: Url): List<RemoteCalendar>
         1, WebDAV.ResourceType, WebDAV.DisplayName, CalDAV.CalendarColor, CalDAV.SupportedCalendarComponentSet, WebDAV.CurrentUserPrivilegeSet,
     ).responses()
         .filter { r ->
-            r[ResourceType::class.java]?.types?.contains(CalDAV.Calendar) == true &&
-                // No component set means the calendar takes every kind.
-                r[SupportedCalendarComponentSet::class.java]?.supportsEvents != false
+            sameOrigin(r.href, home) &&
+                r[ResourceType::class.java]?.types?.contains(CalDAV.Calendar) == true &&
+                    // No component set means the calendar takes every kind.
+                    r[SupportedCalendarComponentSet::class.java]?.supportsEvents != false
         }
         .map { r ->
             RemoteCalendar(

@@ -44,7 +44,7 @@ class CalDavAccounts(private val context: Context) {
     /** Checks the login against the server, then adds the account and syncs it. Throws with a message for the user. */
     suspend fun add(url: String, user: String, password: String, syncMinutes: Int) = withContext(Dispatchers.IO) {
         val base = Url(if ("://" in url) url.trim() else "https://${url.trim()}")
-        val home = davClient(user, password).use { client ->
+        val home = davClient(user, password, base).use { client ->
             try {
                 findHome(client, base).also { remoteCalendars(client, it) }
             } catch (_: UnauthorizedException) {
@@ -113,7 +113,7 @@ class SyncAdapter(context: Context) : AbstractThreadedSyncAdapter(context, false
         val manager = AccountManager.get(context)
         val home = manager.getUserData(account, KEY_HOME) ?: return
         try {
-            davClient(manager.getUserData(account, KEY_USER), manager.getPassword(account)).use { client ->
+            davClient(manager.getUserData(account, KEY_USER), manager.getPassword(account), Url(home)).use { client ->
                 runBlocking { CalDavSync(account, provider, client).run(Url(home)) }
             }
         } catch (_: UnauthorizedException) {
